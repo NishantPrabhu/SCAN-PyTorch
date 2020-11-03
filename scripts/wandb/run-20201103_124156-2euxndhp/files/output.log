@@ -1,0 +1,26 @@
+[33m
+[INFO] Beginning training[0m
+[32m
+EPOCH 1/5[0m
+[32m------------------------------------------[0m
+[Batch]    0/6250 - [Minimum Total Loss] -13.8099 - [Winner Head] 3
+[Batch]  625/6250 - [Minimum Total Loss] -13.8154 - [Winner Head] 4
+[Batch] 1250/6250 - [Minimum Total Loss] -13.8154 - [Winner Head] 4
+[Batch] 1875/6250 - [Minimum Total Loss] -13.8154 - [Winner Head] 3
+[Batch] 2500/6250 - [Minimum Total Loss] -13.8155 - [Winner Head] 3
+[Batch] 3125/6250 - [Minimum Total Loss] -13.8155 - [Winner Head] 4
+[Batch] 3750/6250 - [Minimum Total Loss] -13.8155 - [Winner Head] 4
+[Batch] 4375/6250 - [Minimum Total Loss] -13.8155 - [Winner Head] 4
+[Batch] 5000/6250 - [Minimum Total Loss] -13.8155 - [Winner Head] 4
+Traceback (most recent call last):
+  File "main.py", line 66, in <module>
+    trained_model = scan_model.train_clustering(epochs=args['clustering_epochs'], save_frequency=args['save_frequency'])
+  File "/home/nishant/Desktop/Desktop/Papers2code/Implementations/SCAN/scripts/scan.py", line 201, in train_clustering
+    self.model.backpropagate(total_losses)
+  File "/home/nishant/Desktop/Desktop/Papers2code/Implementations/SCAN/scripts/models.py", line 111, in backpropagate
+    l.backward()
+  File "/usr/local/lib/python3.8/dist-packages/torch/tensor.py", line 185, in backward
+    torch.autograd.backward(self, gradient, retain_graph, create_graph)
+  File "/usr/local/lib/python3.8/dist-packages/torch/autograd/__init__.py", line 125, in backward
+    Variable._execution_engine.run_backward(
+KeyboardInterrupt

@@ -1,0 +1,107 @@
+[33m
+[INFO] Beginning training[0m
+[32m
+EPOCH 1/5[0m
+[32m------------------------------------------[0m
+[Batch]    0/6250 - [Minimum Total Loss] -13.8112 - [Winner Head] 3
+[32m
+EPOCH 1[0m
+[32m	Average total loss                -13.8088[0m
+[32m
+=======================================================[0m
+
+[INFO] Saved model at epoch 1
+
+[32m
+EPOCH 2/5[0m
+[32m------------------------------------------[0m
+[Batch]    0/6250 - [Minimum Total Loss] -13.8111 - [Winner Head] 3
+[32m
+EPOCH 2[0m
+[32m	Average total loss                -13.8092[0m
+[32m
+=======================================================[0m
+
+[INFO] Saved model at epoch 2
+
+[32m
+EPOCH 3/5[0m
+[32m------------------------------------------[0m
+[Batch]    0/6250 - [Minimum Total Loss] -13.8113 - [Winner Head] 3
+[32m
+EPOCH 3[0m
+[32m	Average total loss                -13.8096[0m
+[32m
+=======================================================[0m
+
+[INFO] Saved model at epoch 3
+
+[32m
+EPOCH 4/5[0m
+[32m------------------------------------------[0m
+[Batch]    0/6250 - [Minimum Total Loss] -13.8116 - [Winner Head] 3
+[32m
+EPOCH 4[0m
+[32m	Average total loss                -13.8100[0m
+[32m
+=======================================================[0m
+
+[INFO] Saved model at epoch 4
+
+[32m
+EPOCH 5/5[0m
+[32m------------------------------------------[0m
+[Batch]    0/6250 - [Minimum Total Loss] -13.8120 - [Winner Head] 3
+[32m
+EPOCH 5[0m
+[32m	Average total loss                -13.8105[0m
+[32m
+=======================================================[0m
+
+[INFO] Saved model at epoch 5
+
+[33m
+[INFO] Beginning self-labelling[0m
+[32m
+EPOCH 1/10[0m
+[32m------------------------------------------------------------[0m
+Traceback (most recent call last):
+  File "main.py", line 74, in <module>
+    scan_model.train_self_labelling(epochs=args['self_labelling_epochs'], threshold=args['threshold'])
+  File "/home/nishant/Desktop/Desktop/Papers2code/Implementations/SCAN/scripts/scan.py", line 328, in train_self_labelling
+    out = get_train_predictions(self.model, batch, self.device)
+  File "/home/nishant/Desktop/Desktop/Papers2code/Implementations/SCAN/scripts/train_utils.py", line 35, in get_train_predictions
+    neighbor_probs = model(neighbor, forward_pass='full')            # Shape -> (batch_size, n_clusters)
+  File "/usr/local/lib/python3.8/dist-packages/torch/nn/modules/module.py", line 722, in _call_impl
+    result = self.forward(*input, **kwargs)
+  File "/home/nishant/Desktop/Desktop/Papers2code/Implementations/SCAN/scripts/models.py", line 92, in forward
+    out = [self.branches[i](x) for i in range(self.n_heads)]
+  File "/home/nishant/Desktop/Desktop/Papers2code/Implementations/SCAN/scripts/models.py", line 92, in <listcomp>
+    out = [self.branches[i](x) for i in range(self.n_heads)]
+  File "/usr/local/lib/python3.8/dist-packages/torch/nn/modules/module.py", line 722, in _call_impl
+    result = self.forward(*input, **kwargs)
+  File "/usr/local/lib/python3.8/dist-packages/torch/nn/modules/container.py", line 117, in forward
+    input = module(input)
+  File "/usr/local/lib/python3.8/dist-packages/torch/nn/modules/module.py", line 722, in _call_impl
+    result = self.forward(*input, **kwargs)
+  File "/home/nishant/Desktop/Desktop/Papers2code/Implementations/SCAN/scripts/models.py", line 276, in forward
+    features = self.contrastive_head(self.backbone(x))
+  File "/usr/local/lib/python3.8/dist-packages/torch/nn/modules/module.py", line 722, in _call_impl
+    result = self.forward(*input, **kwargs)
+  File "/home/nishant/Desktop/Desktop/Papers2code/Implementations/SCAN/scripts/models.py", line 225, in forward
+    out = self.layer3(out)
+  File "/usr/local/lib/python3.8/dist-packages/torch/nn/modules/module.py", line 722, in _call_impl
+    result = self.forward(*input, **kwargs)
+  File "/usr/local/lib/python3.8/dist-packages/torch/nn/modules/container.py", line 117, in forward
+    input = module(input)
+  File "/usr/local/lib/python3.8/dist-packages/torch/nn/modules/module.py", line 722, in _call_impl
+    result = self.forward(*input, **kwargs)
+  File "/home/nishant/Desktop/Desktop/Papers2code/Implementations/SCAN/scripts/models.py", line 137, in forward
+    out = self.bn2(self.conv2(out))
+  File "/usr/local/lib/python3.8/dist-packages/torch/nn/modules/module.py", line 722, in _call_impl
+    result = self.forward(*input, **kwargs)
+  File "/usr/local/lib/python3.8/dist-packages/torch/nn/modules/batchnorm.py", line 113, in forward
+    self.num_batches_tracked = self.num_batches_tracked + 1
+  File "/usr/local/lib/python3.8/dist-packages/torch/nn/modules/module.py", line 783, in __setattr__
+    params = self.__dict__.get('_parameters')
+KeyboardInterrupt

@@ -1,0 +1,173 @@
+[33m
+[INFO] Beginning training[0m
+[32m
+EPOCH 1/5[0m
+[32m------------------------------------------[0m
+[Batch]    0/6250 - [Minimum Total Loss] 4.4726 - [Winner Head] 3
+[Batch]  625/6250 - [Minimum Total Loss] 4.2658 - [Winner Head] 4
+[Batch] 1250/6250 - [Minimum Total Loss] 4.1724 - [Winner Head] 4
+[Batch] 1875/6250 - [Minimum Total Loss] 4.1385 - [Winner Head] 4
+[Batch] 2500/6250 - [Minimum Total Loss] 4.1214 - [Winner Head] 4
+[Batch] 3125/6250 - [Minimum Total Loss] 4.1111 - [Winner Head] 4
+[Batch] 3750/6250 - [Minimum Total Loss] 4.1042 - [Winner Head] 4
+[Batch] 4375/6250 - [Minimum Total Loss] 4.0994 - [Winner Head] 4
+[Batch] 5000/6250 - [Minimum Total Loss] 4.0957 - [Winner Head] 4
+[Batch] 5625/6250 - [Minimum Total Loss] 4.0928 - [Winner Head] 4
+[32m
+EPOCH 1[0m
+[32m	Average total loss                4.0998[0m
+[32m
+=======================================================[0m
+
+[INFO] Saved model at epoch 1
+
+[32m
+EPOCH 2/5[0m
+[32m------------------------------------------[0m
+[Batch]    0/6250 - [Minimum Total Loss] 4.0905 - [Winner Head] 4
+[Batch]  625/6250 - [Minimum Total Loss] 4.0887 - [Winner Head] 4
+[Batch] 1250/6250 - [Minimum Total Loss] 4.0871 - [Winner Head] 4
+[Batch] 1875/6250 - [Minimum Total Loss] 4.0858 - [Winner Head] 4
+[Batch] 2500/6250 - [Minimum Total Loss] 4.0847 - [Winner Head] 4
+[Batch] 3125/6250 - [Minimum Total Loss] 4.0837 - [Winner Head] 4
+[Batch] 3750/6250 - [Minimum Total Loss] 4.0828 - [Winner Head] 4
+[Batch] 4375/6250 - [Minimum Total Loss] 4.0821 - [Winner Head] 4
+[Batch] 5000/6250 - [Minimum Total Loss] 4.0814 - [Winner Head] 4
+[Batch] 5625/6250 - [Minimum Total Loss] 4.0808 - [Winner Head] 4
+[32m
+EPOCH 2[0m
+[32m	Average total loss                4.0849[0m
+[32m
+=======================================================[0m
+
+[INFO] Saved model at epoch 2
+
+[32m
+EPOCH 3/5[0m
+[32m------------------------------------------[0m
+[Batch]    0/6250 - [Minimum Total Loss] 4.0803 - [Winner Head] 4
+[Batch]  625/6250 - [Minimum Total Loss] 4.0798 - [Winner Head] 4
+[Batch] 1250/6250 - [Minimum Total Loss] 4.0793 - [Winner Head] 4
+[Batch] 1875/6250 - [Minimum Total Loss] 4.0789 - [Winner Head] 4
+[Batch] 2500/6250 - [Minimum Total Loss] 4.0785 - [Winner Head] 4
+[Batch] 3125/6250 - [Minimum Total Loss] 4.0781 - [Winner Head] 4
+[Batch] 3750/6250 - [Minimum Total Loss] 4.0776 - [Winner Head] 4
+[Batch] 4375/6250 - [Minimum Total Loss] 4.0772 - [Winner Head] 4
+[Batch] 5000/6250 - [Minimum Total Loss] 4.0767 - [Winner Head] 4
+[Batch] 5625/6250 - [Minimum Total Loss] 4.0762 - [Winner Head] 4
+[32m
+EPOCH 3[0m
+[32m	Average total loss                4.0788[0m
+[32m
+=======================================================[0m
+
+[INFO] Saved model at epoch 3
+
+[32m
+EPOCH 4/5[0m
+[32m------------------------------------------[0m
+[Batch]    0/6250 - [Minimum Total Loss] 4.0757 - [Winner Head] 4
+[Batch]  625/6250 - [Minimum Total Loss] 4.0752 - [Winner Head] 4
+[Batch] 1250/6250 - [Minimum Total Loss] 4.0748 - [Winner Head] 4
+[Batch] 1875/6250 - [Minimum Total Loss] 4.0743 - [Winner Head] 4
+[Batch] 2500/6250 - [Minimum Total Loss] 4.0738 - [Winner Head] 4
+[Batch] 3125/6250 - [Minimum Total Loss] 4.0732 - [Winner Head] 4
+[Batch] 3750/6250 - [Minimum Total Loss] 4.0727 - [Winner Head] 4
+[Batch] 4375/6250 - [Minimum Total Loss] 4.0722 - [Winner Head] 4
+[Batch] 5000/6250 - [Minimum Total Loss] 4.0717 - [Winner Head] 4
+[Batch] 5625/6250 - [Minimum Total Loss] 4.0713 - [Winner Head] 4
+[32m
+EPOCH 4[0m
+[32m	Average total loss                4.0731[0m
+[32m
+=======================================================[0m
+
+[INFO] Saved model at epoch 4
+
+[32m
+EPOCH 5/5[0m
+[32m------------------------------------------[0m
+[Batch]    0/6250 - [Minimum Total Loss] 4.0708 - [Winner Head] 4
+[Batch]  625/6250 - [Minimum Total Loss] 4.0703 - [Winner Head] 4
+[Batch] 1250/6250 - [Minimum Total Loss] 4.0698 - [Winner Head] 4
+[Batch] 1875/6250 - [Minimum Total Loss] 4.0694 - [Winner Head] 4
+[Batch] 2500/6250 - [Minimum Total Loss] 4.0690 - [Winner Head] 4
+[Batch] 3125/6250 - [Minimum Total Loss] 4.0685 - [Winner Head] 4
+[Batch] 3750/6250 - [Minimum Total Loss] 4.0681 - [Winner Head] 4
+[Batch] 4375/6250 - [Minimum Total Loss] 4.0677 - [Winner Head] 4
+[Batch] 5000/6250 - [Minimum Total Loss] 4.0673 - [Winner Head] 4
+[Batch] 5625/6250 - [Minimum Total Loss] 4.0669 - [Winner Head] 4
+[32m
+EPOCH 5[0m
+[32m	Average total loss                4.0681[0m
+[32m
+=======================================================[0m
+
+[INFO] Saved model at epoch 5
+
+[33m
+[INFO] Beginning self-labelling[0m
+[32m
+EPOCH 1/10[0m
+[32m------------------------------------------------------------[0m
+[32m
+Epoch   1/10 - [Average loss] 0.0000 - [Average accuracy] 0.0000[0m
+[32m
+=======================================================================[0m
+[32m
+EPOCH 2/10[0m
+[32m------------------------------------------------------------[0m
+[32m
+Epoch   2/10 - [Average loss] 0.0000 - [Average accuracy] 0.0000[0m
+[32m
+=======================================================================[0m
+[32m
+EPOCH 3/10[0m
+[32m------------------------------------------------------------[0m
+[32m
+Epoch   3/10 - [Average loss] 0.0000 - [Average accuracy] 0.0000[0m
+[32m
+=======================================================================[0m
+[32m
+EPOCH 4/10[0m
+[32m------------------------------------------------------------[0m
+Traceback (most recent call last):
+  File "main.py", line 74, in <module>
+    scan_model.train_self_labelling(epochs=args['self_labelling_epochs'], threshold=args['threshold'])
+  File "/home/nishant/Desktop/Desktop/Papers2code/Implementations/SCAN/scripts/scan.py", line 326, in train_self_labelling
+    out = get_train_predictions(self.model, batch, self.device)
+  File "/home/nishant/Desktop/Desktop/Papers2code/Implementations/SCAN/scripts/train_utils.py", line 35, in get_train_predictions
+    neighbor_probs = model(neighbor, forward_pass='full')            # Shape -> (batch_size, n_clusters)
+  File "/usr/local/lib/python3.8/dist-packages/torch/nn/modules/module.py", line 722, in _call_impl
+    result = self.forward(*input, **kwargs)
+  File "/home/nishant/Desktop/Desktop/Papers2code/Implementations/SCAN/scripts/models.py", line 92, in forward
+    out = [self.branches[i](x) for i in range(self.n_heads)]
+  File "/home/nishant/Desktop/Desktop/Papers2code/Implementations/SCAN/scripts/models.py", line 92, in <listcomp>
+    out = [self.branches[i](x) for i in range(self.n_heads)]
+  File "/usr/local/lib/python3.8/dist-packages/torch/nn/modules/module.py", line 722, in _call_impl
+    result = self.forward(*input, **kwargs)
+  File "/usr/local/lib/python3.8/dist-packages/torch/nn/modules/container.py", line 117, in forward
+    input = module(input)
+  File "/usr/local/lib/python3.8/dist-packages/torch/nn/modules/module.py", line 722, in _call_impl
+    result = self.forward(*input, **kwargs)
+  File "/home/nishant/Desktop/Desktop/Papers2code/Implementations/SCAN/scripts/models.py", line 276, in forward
+    features = self.contrastive_head(self.backbone(x))
+  File "/usr/local/lib/python3.8/dist-packages/torch/nn/modules/module.py", line 722, in _call_impl
+    result = self.forward(*input, **kwargs)
+  File "/home/nishant/Desktop/Desktop/Papers2code/Implementations/SCAN/scripts/models.py", line 225, in forward
+    out = self.layer3(out)
+  File "/usr/local/lib/python3.8/dist-packages/torch/nn/modules/module.py", line 722, in _call_impl
+    result = self.forward(*input, **kwargs)
+  File "/usr/local/lib/python3.8/dist-packages/torch/nn/modules/container.py", line 117, in forward
+    input = module(input)
+  File "/usr/local/lib/python3.8/dist-packages/torch/nn/modules/module.py", line 722, in _call_impl
+    result = self.forward(*input, **kwargs)
+  File "/home/nishant/Desktop/Desktop/Papers2code/Implementations/SCAN/scripts/models.py", line 136, in forward
+    out = F.relu(self.bn1(self.conv1(x)))
+  File "/usr/local/lib/python3.8/dist-packages/torch/nn/modules/module.py", line 722, in _call_impl
+    result = self.forward(*input, **kwargs)
+  File "/usr/local/lib/python3.8/dist-packages/torch/nn/modules/batchnorm.py", line 113, in forward
+    self.num_batches_tracked = self.num_batches_tracked + 1
+  File "/usr/local/lib/python3.8/dist-packages/torch/nn/modules/module.py", line 774, in __setattr__
+    def __setattr__(self, name: str, value: Union[Tensor, 'Module']) -> None:
+KeyboardInterrupt
