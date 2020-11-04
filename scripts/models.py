@@ -6,7 +6,7 @@ SimCLR and Clustering models
 """
 
 import os
-import numpy as np 
+import numpy as np
 from sklearn import metrics
 from torchvision import models
 from logging_utils import Scalar
@@ -35,9 +35,9 @@ class Backbone(torch.nn.Module):
 
         layers = list(base.children())
         self.backbone = torch.nn.Sequential(
-            conv_1, 
+            conv_1,
             bn_1,
-            torch.nn.ReLU(), 
+            torch.nn.ReLU(),
             maxpool_1,
             *layers[4:len(layers)-1],
             flatten
@@ -68,15 +68,15 @@ class ClusteringModel(torch.nn.Module):
 
     def __init__(self, name, n_clusters, n_heads, feature_dim=128, pretrained_model=None):
         super(ClusteringModel, self).__init__()
-        
+
         self.n_heads = n_heads
         self.backbone = ContrastiveModel(dataset=name, head='mlp', features_dim=feature_dim)
-        self.heads = torch.nn.ModuleList([Head(in_features=feature_dim, n_clusters=n_clusters) for _ in range(n_heads)])    
+        self.heads = torch.nn.ModuleList([Head(in_features=feature_dim, n_clusters=n_clusters) for _ in range(n_heads)])
 
         if pretrained_model is not None:
             print("\n[INFO] Loading {} into backbone".format(pretrained_model.split('/')[-1]))
             self.backbone.load_state_dict(torch.load(pretrained_model))
-        
+
         self.branches = torch.nn.ModuleList([torch.nn.Sequential(self.backbone, self.heads[i]) for i in range(n_heads)])
 
 
@@ -86,18 +86,18 @@ class ClusteringModel(torch.nn.Module):
             out = self.backbone(x)
 
         elif forward_pass == 'head':
-            out = [self.heads[i](x) for i in range(self.n_heads)]         
+            out = [self.heads[i](x) for i in range(self.n_heads)]
 
         elif forward_pass == 'full':
-            out = [self.branches[i](x) for i in range(self.n_heads)]   
-            
+            out = [self.branches[i](x) for i in range(self.n_heads)]
+
         elif 'branch_' in forward_pass:
             try:
                 idx = int(forward_pass.split('_')[1])
             except:
-                raise ValueError('Branch specification error')  
+                raise ValueError('Branch specification error')
 
-            out = self.branches[idx](x)   
+            out = self.branches[idx](x)
 
         return out
 
@@ -259,16 +259,16 @@ class ContrastiveModel(nn.Module):
         self.backbone = backbone['backbone']
         self.backbone_dim = backbone['dim']
         self.head = head
- 
+
         if head == 'linear':
             self.contrastive_head = nn.Linear(self.backbone_dim, features_dim)
 
         elif head == 'mlp':
             self.contrastive_head = nn.Sequential(
                 nn.Linear(self.backbone_dim, self.backbone_dim),
-                nn.ReLU(), 
+                nn.ReLU(),
                 nn.Linear(self.backbone_dim, features_dim))
-        
+
         else:
             raise ValueError('Invalid head {}'.format(head))
 

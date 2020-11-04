@@ -79,7 +79,7 @@ class SCAN():
             self.n_heads = n_heads
             self.model = ClusteringModel(dataset, self.n_clusters, self.n_heads,
                 feature_dim=128, pretrained_model=simclr_pretrained[dataset]).to(self.device)
-            self.optim = optim.Adam(self.model.parameters(), lr=learning_rate)
+            self.optim = optim.Adam(self.model.parameters(), lr=learning_rate, weight_decay=1e-04)
 
         else:
 
@@ -88,7 +88,7 @@ class SCAN():
             self.model = ClusteringModel(dataset, self.n_clusters, self.n_heads,
                 feature_dim=128, pretrained_model=simclr_pretrained[dataset]).to(self.device)
             self.model.load_state_dict(torch.load(latest_model, map_location=self.device))
-            self.optim = optim.Adam(self.model.parameters(), lr=learning_rate)
+            self.optim = optim.Adam(self.model.parameters(), lr=learning_rate, weight_decay=1e-04)
             self.optim.load_state_dict(torch.load(latest_optim))
 
         print("Complete!")
@@ -110,8 +110,8 @@ class SCAN():
 
         for i in range(self.n_heads):
             sim_loss = similarity_loss(image_out[i], neighbor_out[i])
-            ent_loss = entropy_loss(combined_out[i])
-            total_loss = sim_loss - self.entropy_weight * (1. / (ent_loss + 1e-06))
+            ent_loss = entropy_loss(image_out[i].mean(dim=0))
+            total_loss = sim_loss - self.entropy_weight * ent_loss
 
             sim_losses.append(sim_loss)
             ent_losses.append(ent_loss)
@@ -190,7 +190,7 @@ class SCAN():
                 out = get_train_predictions(self.model, batch, self.device)
 
                 # Compute similarity loss and entropy loss
-                _, _, total_losses = self.compute_loss(out['image_probs'], out['neighbor_probs'], out['probs'])
+                sim_losses, ent_losses, total_losses = self.compute_loss(out['image_probs'], out['neighbor_probs'], out['probs'])
 
                 # Update loss on loss_meter
                 for j in range(self.n_heads):
@@ -203,14 +203,22 @@ class SCAN():
 
                 # Intra-epoch logging
                 min_loss_head, min_loss = self.find_best_head()
+                min_sim_loss = min([s.item() for s in sim_losses])
+                min_ent_loss = min([e.item() for e in ent_losses])
+
                 self.model.heads[min_loss_head].best_head += 1
 
                 if i % int(0.1 * len(self.train_loader)) == 0:
-                    print("[Batch] {:4d}/{} - [Minimum Total Loss] {:.4f} - [Winner Head] {}".format(
-                        i, len(self.train_loader), min_loss, min_loss_head))
+                    print("[Batch] {:4d}/{} - [Min TL] {:.4f} - [EL] {:.4f} - [SL] {:.4f}".format(
+                        i, len(self.train_loader), min_loss, min_ent_loss, min_sim_loss
+                    ))
 
                 # Log on wandb
-                wandb.log({'Minimum loss': min_loss})
+                wandb.log({
+                    'Minimum loss': min_loss,
+                    'Similarity loss': min_sim_loss,
+                    'Entropy loss': min_ent_loss
+                })
 
 
             # Find head with lowest final total loss
@@ -228,9 +236,9 @@ class SCAN():
             # Logging
             wandb.log({
                 'Mean loss': mean_total_loss,
-                # 'Hungarian accuracy': accuracy,
-                # 'Adjusted rand index': ari,
-                # 'Normalized mutual information': nmi
+            #     'Hungarian accuracy': accuracy,
+            #     'Adjusted rand index': ari,
+            #     'Normalized mutual information': nmi
             })
 
             # Summarize epoch

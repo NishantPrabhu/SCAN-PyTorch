@@ -6,8 +6,8 @@ Author: Nishant Prabhu
 
 """
 
-import torch 
-import numpy as np 
+import torch
+import numpy as np
 
 
 def get_feature_vectors(model, batch):
@@ -33,8 +33,8 @@ def get_train_predictions(model, batch, device):
     image, neighbor = image.to(device), neighbor.to(device)
     image_probs = model(image, forward_pass='full')                  # Shape -> (batch_size, n_clusters)
     neighbor_probs = model(neighbor, forward_pass='full')            # Shape -> (batch_size, n_clusters)
-    combined_probs = [torch.cat([i, j], dim=0) for i, j in zip(image_probs, neighbor_probs)]             
-    
+    combined_probs = [torch.cat([i, j], dim=0) for i, j in zip(image_probs, neighbor_probs)]
+
     image_preds = torch.cat([p.argmax(dim=-1) for p in image_probs], dim=0)         # Shape -> (batch_size,)
     neighbor_preds = torch.cat([p.argmax(dim=-1) for p in neighbor_probs], dim=0)   # Shape -> (batch_size,)
     combined_preds = torch.cat((image_preds, neighbor_preds), dim=0)                # Shape -> (2*batch_size,)
@@ -46,7 +46,7 @@ def get_train_predictions(model, batch, device):
         'image_preds': image_preds,
         'neighbor_preds': neighbor_preds,
         'preds': combined_preds,
-        'labels': label.to(device) 
+        'labels': label.to(device)
     }
 
 
@@ -64,5 +64,5 @@ def get_val_predictions(model, batch, device):
     return {
         'probs': image_probs,
         'preds': image_preds,
-        'labels': label 
+        'labels': label
     }

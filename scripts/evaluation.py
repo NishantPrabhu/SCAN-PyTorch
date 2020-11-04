@@ -28,8 +28,15 @@ def entropy_loss(x):
     # Data type checks
     assert isinstance(x, torch.Tensor), f"x has to be torch.Tensor, got {type(x)}"
 
-    av_ = torch.mean(x, dim=0)
-    return av_ @ torch.log(av_).t()
+    x_ = torch.clamp(x, min=1e-10)
+    b = x_ * torch.log(x)
+
+    if len(b.size()) == 1:
+        return -b.sum()
+    elif len(b.size()) == 2:
+        return -b.sum(dim=1).mean()
+    else:
+        raise ValueError("Entropy loss shape error")
 
 
 def similarity_loss(image_probs, neighbors_probs):
@@ -51,10 +58,8 @@ def similarity_loss(image_probs, neighbors_probs):
     assert isinstance(neighbors_probs, torch.Tensor), f"neighbors_probs should be torch.Tensor, got {type(neighbors_probs)}"
 
     # Compute similarity score of each image output with every neighbor output
-    sim_scores = image_probs @ neighbors_probs.t()
-
-    # Extract the diagonal to get only score between image and its neighbor
-    sim_scores = torch.diagonal(sim_scores)
+    b, n = image_probs.size()
+    sim_scores = torch.bmm(image_probs.view(b, 1, n), neighbors_probs.view(b, n, 1)).squeeze()
 
     # Compute binary cross entropy loss
     ones = torch.ones_like(sim_scores)
@@ -89,7 +94,7 @@ def get_confusion_matrix(predictions, targets, class_names=None, title='', name=
 
 
 @torch.no_grad()
-def hungarian_evaluate(subhead_index, all_predictions, class_names=None, confusion_matrix=True, 
+def hungarian_evaluate(subhead_index, all_predictions, class_names=None, confusion_matrix=True,
                        confusion_matrix_kwargs={'title': '', 'name': 'confusion_matrix.jpeg'}):
 
     # Evaluate model based on hungarian matching between predicted cluster assignment and gt classes.
@@ -108,7 +113,7 @@ def hungarian_evaluate(subhead_index, all_predictions, class_names=None, confusi
     acc = (reset_preds == targets.numpy()).mean()
     nmi = metrics.normalized_mutual_info_score(targets.numpy(), predictions.numpy())
     ari = metrics.adjusted_rand_score(targets.numpy(), predictions.numpy())
-    
+
     # Compute confusion matrix
     if compute_confusion_matrix:
         get_confusion_matrix(reset_preds, targets.numpy(), class_names, **confusion_matrix_kwargs)
@@ -125,7 +130,7 @@ def find_unique(targets, preds):
             targets_uniq.append(t)
         if p not in preds_uniq:
             preds_uniq.append(p)
-            
+
     return targets_uniq, preds_uniq
 
 
@@ -147,7 +152,7 @@ def _hungarian_match(flat_preds, flat_targets):
             # elementwise, so each sample contributes once
             votes = int(((flat_preds == preds_uniq[c1]) * (flat_targets == targets_uniq[c2])).sum())
             num_correct[c1, c2] = votes
-            
+
     # num_correct is small
     match = linear_sum_assignment(-num_correct)
     match = np.array(list(zip(*match)))
@@ -159,6 +164,6 @@ def _hungarian_match(flat_preds, flat_targets):
 
     # mapping
     label_map = {preds_uniq[min(i, len(preds_uniq)-1)]: targets_uniq[j] for i, j in res}
-    label_map = {j.item(): i.item() for i, j in label_map.items()}    
-    
+    label_map = {j.item(): i.item() for i, j in label_map.items()}
+
     return label_map
