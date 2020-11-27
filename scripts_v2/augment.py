@@ -1,40 +1,30 @@
 
 """
-Augmentation utility for SCAN
+Script to implement RandAugment
+Taken as-it-is from SCAN's original repository
 
-Adapted from https://github.com/wvangansbeke/Unsupervised-Classification/blob/master/data/augment.py
 """
 
-
-# List of augmentations based on randaugment
 import random
-import PIL
-import PIL.ImageOps
-import PIL.ImageEnhance
-import PIL.ImageDraw
+import PIL, PIL.ImageOps, PIL.ImageEnhance, PIL.ImageDraw
 import numpy as np
 import torch
 from torchvision.transforms.transforms import Compose
-from torchvision import transforms as T
 
 random_mirror = True
-
 
 def ShearX(img, v):
     if random_mirror and random.random() > 0.5:
         v = -v
     return img.transform(img.size, PIL.Image.AFFINE, (1, v, 0, 0, 1, 0))
 
-
 def ShearY(img, v):
     if random_mirror and random.random() > 0.5:
         v = -v
     return img.transform(img.size, PIL.Image.AFFINE, (1, 0, 0, v, 1, 0))
 
-
 def Identity(img, v):
     return img
-
 
 def TranslateX(img, v):
     if random_mirror and random.random() > 0.5:
@@ -42,74 +32,60 @@ def TranslateX(img, v):
     v = v * img.size[0]
     return img.transform(img.size, PIL.Image.AFFINE, (1, 0, v, 0, 1, 0))
 
-
 def TranslateY(img, v):
     if random_mirror and random.random() > 0.5:
         v = -v
     v = v * img.size[1]
     return img.transform(img.size, PIL.Image.AFFINE, (1, 0, 0, 0, 1, v))
 
-
 def TranslateXAbs(img, v):
     if random.random() > 0.5:
         v = -v
     return img.transform(img.size, PIL.Image.AFFINE, (1, 0, v, 0, 1, 0))
-
 
 def TranslateYAbs(img, v):
     if random.random() > 0.5:
         v = -v
     return img.transform(img.size, PIL.Image.AFFINE, (1, 0, 0, 0, 1, v))
 
-
 def Rotate(img, v):
     if random_mirror and random.random() > 0.5:
         v = -v
     return img.rotate(v)
 
-
 def AutoContrast(img, _):
     return PIL.ImageOps.autocontrast(img)
-
 
 def Invert(img, _):
     return PIL.ImageOps.invert(img)
 
-
 def Equalize(img, _):
     return PIL.ImageOps.equalize(img)
 
-
 def Solarize(img, v):
     return PIL.ImageOps.solarize(img, v)
-
 
 def Posterize(img, v):
     v = int(v)
     return PIL.ImageOps.posterize(img, v)
 
-
 def Contrast(img, v):
     return PIL.ImageEnhance.Contrast(img).enhance(v)
-
 
 def Color(img, v):
     return PIL.ImageEnhance.Color(img).enhance(v)
 
-
 def Brightness(img, v):
     return PIL.ImageEnhance.Brightness(img).enhance(v)
-
 
 def Sharpness(img, v):
     return PIL.ImageEnhance.Sharpness(img).enhance(v)
 
-
 def augment_list():
     l = [
-        (Identity, 0, 1),
+        (Identity, 0, 1),  
         (AutoContrast, 0, 1),
-        (Equalize, 0, 1),
+        (Equalize, 0, 1), 
         (Rotate, -30, 30),
         (Solarize, 0, 256),
         (Color, 0.05, 0.95),
@@ -127,9 +103,7 @@ def augment_list():
 
 augment_dict = {fn.__name__: (fn, v1, v2) for fn, v1, v2 in augment_list()}
 
-
 class Augment:
-
     def __init__(self, n):
         self.n = n
         self.augment_list = augment_list()
@@ -142,18 +116,14 @@ class Augment:
 
         return img
 
-
 def get_augment(name):
     return augment_dict[name]
-
 
 def apply_augment(img, name, level):
     augment_fn, low, high = get_augment(name)
     return augment_fn(img.copy(), level * (high - low) + low)
 
-
 class Cutout(object):
-    
     def __init__(self, n_holes, length, random=False):
         self.n_holes = n_holes
         self.length = length
@@ -181,19 +151,3 @@ class Cutout(object):
         img = img * mask
 
         return img
-
-
-class TensorAugment:
-
-    def __init__(self):
-        self.augment_list = Compose([
-            T.ToPILImage(),
-            T.RandomGrayscale(),
-            T.RandomHorizontalFlip(),
-            T.RandomResizedCrop(size=32, scale=(0.2, 1.0)),
-            T.RandomRotation(degrees=60),
-            T.ToTensor()
-        ])
-
-    def __call__(self, t):
-        return torch.cat([self.augment_list(x.detach().cpu()).unsqueeze(0) for x in t], dim=0)

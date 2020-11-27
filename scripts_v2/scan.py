@@ -1,269 +1,233 @@
 
-"""
-Main SCAN class and some other stuff
-
-@author: Nishant Prabhu
-
-"""
-
-# Dependencies
-import os
-import wandb
-import torch
-import pickle
-import torchvision
-import numpy as np
-import torch.nn as nn
+import torch 
+import torchvision.transforms as T
+from torchvision import datasets
+import torch.nn.functional as F 
 import torch.optim as optim
+
+import wandb
+import numpy as np
+from tqdm import tqdm
 from termcolor import cprint
-from torchvision import transforms as T
-import torch.nn.functional as F
-
-from logging_utils import Scalar
-from models import ClusteringModel, ContrastiveModel
-from augment import Augment, Cutout, TensorAugment
-from losses import SCANLoss, ConfidenceBasedCE
-from train_utils import get_train_predictions, get_val_predictions
-from data_utils import generate_data_loaders, generate_embeddings
-from sklearn.utils.class_weight import compute_class_weight
+from models import SimCLR, ClusteringModel, ContrastiveModel
+from losses import SCANLoss, ConfidenceBasedCELoss
+from data_utils import NeighborsDataset, MemoryBank, Scalar
 
 
-cluster_map = {
-    'cifar10': 10,
-    'cifar100': 100,
-    'stl10': 10
+# Metadata
+meta = {
+    'cifar10': {'data': datasets.CIFAR10, 'n_classes': 10},
+    'cifar100': {'data': datasets.CIFAR100, 'n_classes': 100},
+    'stl10': {'data': datasets.STL10, 'n_classes': 10}
 }
 
-simclr_pretrained = {
-    'cifar10': '../simclr/pretrained_models/simclr_cifar-10.pth.tar',
-    'cifar100': '../simclr/pretrained_models/simclr_cifar-20.pth.tar',
-    'stl10': '../simclr/pretrained_models/simclr_stl-10.pth.tar'
+norms = {
+    'cifar10': {'mean': [0.4914, 0.4822, 0.4465], 'std': [0.2023, 0.1994, 0.2010]},
+    'cifar100': {'mean': [0.5071, 0.4867, 0.4408], 'std': [0.2675, 0.2565, 0.2761]},
+    'stl10': {'mean': [0.485, 0.456, 0.406], 'std': [0.229, 0.224, 0.225]}
+}
+
+backbone_dims = {
+    'resnet18': 512,
+    'resnet34': 512,
+    'resnet50': 2048
 }
 
 
-class SCAN():
+class SCAN:
 
-    def __init__(self, dataset, n_neighbors, transforms, batch_size, learning_rate=1e-04, entropy_weight=5, threshold=0.9):
-
-        self.save_path = './'
+    def __init__(self, data_name='cifar10', n_neighbors=5, batch_size=128, learning_rate=1e-04, entropy_weight=2, threshold=0.9):
+        
+        self.name = data_name
         self.batch_size = batch_size
-        self.entropy_weight = entropy_weight
-        self.aug_func = Augment(n=4)
-        self.tensor_aug = TensorAugment()
-        self.image_transform = transforms['standard']
-        self.augment_transform = transforms['augment']
-        self.n_clusters = cluster_map[dataset]
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-        self.thresh = threshold
+        self.n_neighbors = n_neighbors
+        cprint('\n[INFO] Device found: {}'.format(self.device), 'yellow')
+        
+        # Dataset
+        tensor_transform = T.Compose([
+            T.ToTensor(), 
+            T.Normalize(norms[self.name]['mean'], norms[self.name]['std'])
+        ])
+        self.dataset = meta[self.name]['data'](root='../data/{}'.format(self.name), train=True, 
+                                               transform=tensor_transform, download=True)
+        
+        # Model and optimizer
+        cprint('\n[INFO] Initializing model and optimizer', 'yellow')
+        # self.simclr = SimCLR(name='resnet18', feature_dim=128).to(self.device)
+        # self.simclr.load_state_dict(torch.load('../saved_data/models/simclr_cifar10.pth.tar', map_location=self.device))
+        
+        self.simclr = ContrastiveModel(self.name, head='mlp', feature_dim=128).to(self.device)
+        self.simclr.load_state_dict(torch.load('../saved_data/pretrained/simclr_cifar-10.pth.tar', map_location=self.device))
+        self.model = ClusteringModel(self.simclr.backbone, self.simclr.backbone_dim, meta[self.name]['n_classes']).to(self.device)
+        self.opt = optim.Adam(self.model.parameters(), lr=learning_rate, weight_decay=1e-04)
 
-        # Loss functions
-        self.scan_loss = SCANLoss(entropy_weight)
-        self.self_labelling_loss = ConfidenceBasedCE(threshold, True)
+        # Memory bank and generate initial neighbor_idx
+        self.memory = MemoryBank(size=len(self.dataset), dim=self.simclr.backbone_dim, num_classes=meta[self.name]['n_classes'])
+        self.update_simclr_vectors()
+        neighbor_idx, acc = self.memory.mine_nearest_neighbors(n_neighbors, True)
+        print("Initial neighbor mining accuracy: {:.4f}".format(acc))
 
-        # Contrastive model for SimCLR
-        self.encoder = ContrastiveModel(dataset, head='mlp', features_dim=128).to(self.device)
-        self.encoder.load_state_dict(torch.load(simclr_pretrained[dataset]))
+        # Generate NeighborsDataset instance and dataloader for SCAN
+        self.neighbors_dset = NeighborsDataset(self.name, neighbor_idx)
+        self.dataloader = torch.utils.data.DataLoader(self.neighbors_dset, batch_size=batch_size, shuffle=True, num_workers=8)
 
-        # Intialize data loaders
-        cprint("\n[INFO] Initializing data loaders", 'yellow')
-        self.train_loader, self.val_loader = generate_data_loaders(
-            name = dataset,
-            batch_size = batch_size,
-            n_neighbors = n_neighbors,
-            transforms = transforms,
-            embedding_net = self.encoder,
-            augment_fun = self.aug_func,
-        )
-
-        # Initialize model and optimizer
-        cprint("\n[INFO] Initializing clustering model", 'yellow')
-        backbone = {'backbone': self.encoder.backbone, 'dim': self.encoder.backbone_dim}
-        self.model = ClusteringModel(backbone, self.n_clusters).to(self.device)
-        self.optim = optim.Adam(self.model.parameters(), lr=learning_rate, weight_decay=1e-04)
-
-        print("Complete!")
-
-        # Wandb initialization
-        cprint("\n[INFO] Initializing wandb", 'yellow')
-        wandb.init(name='scan_' + dataset, project='scan-unsupervised-classification')
-
-
-    def find_best_head(self):
-        """
-        Finds the head with minimum loss and its loss
-        criterion options: 'loss', 'votes'
-
-        """
-        losses = [self.model.heads[i].loss.mean for i in range(self.n_heads)]
-        return np.argmin(losses), min(losses)
+        # Loss function
+        self.clustering_loss = SCANLoss(entropy_weight=entropy_weight)
+        self.self_labelling_loss = ConfidenceBasedCELoss(threshold=threshold, apply_class_balancing=True)
+        
+        # wandb initialization
+        cprint('\n[INFO] Initializing wandb...', 'yellow')
+        wandb.init(name='test-run-simple', project='scan-v2')
 
 
-    def evaluate_model(self):
-        """
-        Some evaluation method, don't know what to call
+    def clustering_train_step(self):
 
-        """
-        predictions, ground_truth = [], []
+        loss_meter = Scalar()
+        for i, batch in enumerate(self.dataloader):
 
-        for batch in self.val_loader:
-            images, labels = batch
-            preds = self.model(images.to(self.device)).argmax(dim=-1).detach().cpu()
-            predictions.append(preds)
-            ground_truth.append(labels)
+            # Compute loss
+            anchor, neighbor = batch['anchor'].to(self.device), batch['neighbor'].to(self.device)
+            anchor_logits = self.model(anchor)
+            neighbor_logits = self.model(neighbor)
+            loss, consistency_loss, entropy_loss = self.clustering_loss(anchor_logits, neighbor_logits)
+            
+            # Backprop and update
+            self.opt.zero_grad()
+            loss.backward()
+            self.opt.step()
+            loss_meter.update(loss.item())
+            wandb.log({
+                'Total loss': loss.item(),
+                'Consistency loss': consistency_loss.item(),
+                'Entropy loss': entropy_loss.item() 
+            })
 
-        pred = torch.cat(predictions, dim=0)
-        gt = torch.cat(ground_truth, dim=0)
-        assert pred.shape == gt.shape, "Evaluation pred shape: {}, gt shape: {}".format(pred.shape, gt.shape)
+            if i % int(0.1 * len(self.dataloader)) == 0:
+                print("Batch {:4d}/{} - [Consistency] {:.4f} - [Entropy] {:.4f}".format(
+                    i, len(self.dataloader), consistency_loss, entropy_loss
+                ))
+                
+            
+    def check_clustering_quality(self):
 
-        count_dict = {}
-        for i in torch.unique(pred):
-            gt_slice = gt[torch.where(pred == i)[0]].numpy()
-            most_freq = sorted(gt_slice, key=gt_slice.tolist().count)[-1]
-            max_frac = gt_slice.tolist().count(most_freq) / len(gt_slice)
-            try:
-                count_dict.update({i.item(): max_frac})
-            except Exception as e:
-                count_dict.update({i: max_frac})
+        preds, gt = [], []
+        with torch.no_grad():
+            for batch in self.dataloader:
+                anchor = batch['anchor'].to(self.device)
+                output = self.model(anchor).argmax(dim=-1)        
+                preds.append(output)
+                gt.append(batch['label'])
 
-        cprint("\nEvaluation results", 'green')
-        for k, v in count_dict.items():
-            print("\t{} - {:.4f}".format(k, v))
+        preds = torch.cat(preds, dim=0).cpu().numpy()
+        gt = torch.cat(gt, dim=0).numpy()
+        ratio_dict = {}
 
-        return count_dict
+        for l in np.unique(preds):
+            labels = gt[np.where(preds == l)[0]]
+            max_count_label = sorted(labels, key=labels.tolist().count)[-1]
+            max_frac = labels.tolist().count(max_count_label)/len(labels)
+            ratio_dict.update({l: (max_count_label, max_frac)})
+
+        return ratio_dict
 
 
-    def train_clustering(self, epochs=100, save_frequency=10):
-        """
-            Main training function.
+    def update_simclr_vectors(self):
 
-            Args:
-                epochs <int>
-                    Number of learning runs over the entire dataset
-                entropy_weight <float>
-                    Weightage of entropy loss copmared to similarity loss
-                save_frequency <int>
-                    Number of epochs after which model is checkpointed
+        dataloader = torch.utils.data.DataLoader(self.dataset, batch_size=self.batch_size, shuffle=False, num_workers=8)
+        for imgs, labels in tqdm(dataloader, leave=False):
+            imgs = imgs.to(self.device)
+            fv = self.simclr.backbone(imgs).detach().cpu()
+            self.memory.update(fv, labels)
 
-            Returns:
-                Trained model
-        """
 
-        cprint("\n[INFO] Beginning training", 'yellow')
+    def self_labelling_train_step(self):
 
-        # Iterate over epochs
-        for epoch in range(epochs):
+        loss_meter = Scalar()
+        acc_meter = Scalar()
+        conf_counts = {}
 
-            cprint("\nEPOCH {}/{}".format(epoch+1, epochs), 'green')
-            cprint("------------------------------------------", 'green')
-            loss_meter = Scalar()
+        for i, batch in enumerate(self.dataloader):
+            
+            # Compute self-labelling loss
+            anchor, neighbor = batch['anchor'].to(self.device), batch['neighbor'].to(self.device)
+            anchor_logits = self.model(anchor)
+            neighbor_logits = self.model(neighbor)
+            loss, acc, masked_target = self.self_labelling_loss(anchor_logits, neighbor_logits)
 
-            for i, batch in enumerate(self.train_loader):
+            # Backprop and update model
+            self.opt.zero_grad()
+            loss.backward()
+            self.opt.step()
+            loss_meter.update(loss.item())
+            acc_meter.update(acc)
+            wandb.log({'Self labelling CE loss': loss.item()})
 
-                out = get_train_predictions(self.model, batch, self.device)
-                total_losses, sim_losses, ent_losses = self.scan_loss(out['anchor_logits'], out['neighbor_logits'])
+            # Check how many confident samples are there
+            uniq, count = torch.unique(masked_target, return_counts=True)
+            uniq, count = uniq.cpu().numpy(), count.cpu().numpy()
 
-                # Backpropagate and update model
-                self.optim.zero_grad()
-                total_losses.backward()
-                self.optim.step()
-                loss_meter.update(total_losses.item())
+            for u, c in zip(uniq, count):
+                if u in conf_counts.keys():
+                    conf_counts[u] += c
+                else:
+                    conf_counts[u] = c
 
-                if i % int(0.1 * len(self.train_loader)) == 0:
-                    print("[Batch] {:4d}/{} - [Entropy] {:.4f} - [Consistency] {:.4f}".format(
-                        i, len(self.train_loader), ent_losses, sim_losses
-                    ))
+            if i % int(0.1 * len(self.dataloader)) == 0:
+                print("Batch {:4d}/{} - [Masked CE Loss] {:.4f} - [Accuracy] {:.4f}".format(
+                    i, len(self.dataloader), loss.item(), acc
+                ))
 
-                # Log on wandb
-                wandb.log({
-                    'Similarity loss': sim_losses,
-                    'Entropy loss': ent_losses
-                })
+        return acc_meter.mean, conf_counts
 
-            # Logging
-            wandb.log({'Mean loss': loss_meter.mean})
 
-            # Summarize epoch
-            cprint("Epoch {} - Average total loss: {:.4f}".format(epoch+1, loss_meter.mean), 'green')
+    def train(self, clustering_epochs=200, self_labelling_epochs=100):
 
-            # Every 10th epoch, evaluate
+        cprint('\n[INFO] Beginning clustering training...', 'yellow')
+
+        for epoch in range(clustering_epochs):
+            cprint('\nEpoch {}/{}'.format(epoch+1, clustering_epochs), 'green')
+            cprint('-----------------------------------------------------', 'green')
+
+            # Perform training step
+            self.clustering_train_step()
+
+            # Every 10 epochs, check clustering quality and update simclr vectors
+            # And the save the model and optimizer too
             if (epoch+1) % 10 == 0:
-                _ = self.evaluate_model()
+                ratio_dict = self.check_clustering_quality()
+                print("\nClustering quality check...")
+                for k, v in ratio_dict.items():
+                    print("{} - {:.4f}".format(k, v[1]))
 
-            # Save models
-            if (epoch+1) % save_frequency == 0:
+                # Update simclr vectors
+                self.update_simclr_vectors()
+                neighbor_idx, acc = self.memory.mine_nearest_neighbors(self.n_neighbors, True)
+                print("\nNeighbor mining accuracy: {:.4f}".format(float(acc)))
+                self.neighbors_dset = NeighborsDataset(self.name, neighbor_idx)
+                self.dataloader = torch.utils.data.DataLoader(self.neighbors_dset, batch_size=self.batch_size, 
+                                                              shuffle=True, num_workers=8)
+                wandb.log({'Neighbor mining accuracy': acc})
+
+                # Save model and optim
                 torch.save(self.model.state_dict(), '../saved_data/models/clustering_model')
-                torch.save(self.optim.state_dict(), '../saved_data/models/optimizer')
-                print("\n[INFO] Saved model at epoch {}\n".format(epoch+1))
-
-        return self.model
+                torch.save(self.opt.state_dict(), '../saved_data/models/optimizer')
+                print("[INFO] Saved data at epoch {}".format(epoch+1))
 
 
-    def train_self_labelling(self, epochs=100, save_frequency=10):
-        """
-        Self-labelling function. To be performed after clustering training is complete.
-        Will be done only with the head with lowest loss
+        cprint('\n[INFO] Beginning self-labelling...', 'yellow')
 
-        """
-        # Load the new model into self.model
-        torch.cuda.empty_cache()
-        self.model.load_state_dict(torch.load('../saved_data/models/clustering_model'))
+        for epoch in range(self_labelling_epochs):
+            cprint("\nEpoch {}/{}".format(epoch+1, self_labelling_epochs), 'green')
+            cprint('-----------------------------------------------------', 'green')
 
-        # Confident samples based on model's predictions
-        # This will be a dictionary in which keys are pseudo-labels and values
-        # are a list containing tensors of confident examples with that psuedo-label
-        cprint("\n[INFO] Beginning self-labelling", 'yellow')
+            # Perform training step
+            mean_acc, conf_counts = self.self_labelling_train_step()
 
-        self.confident_samples = {}
-        for epoch in range(epochs):
-            cprint("\nEPOCH {}/{}".format(epoch+1, epochs), 'green')
-            cprint("------------------------------------------------------------", 'green')
+            print("\nEpoch {} - [Mean accuracy] {:.4f}".format(epoch+1, mean_acc))
+            print("Confident sample counts:", conf_counts)
 
-            accuracy_meter = Scalar()
-            loss_meter = Scalar()
-
-            for i, batch in enumerate(self.train_loader):
-                out = get_train_predictions(self.model, batch, self.device)
-                image_logits, neighbor_logits = out['anchor_logits'], out['neighbor_logits']
-                image_probs = F.softmax(image_logits, dim=1)
-                x_locs, y_locs = torch.where(image_probs > self.thresh)     # 2d tensor with probabilities
-
-                if len(x_locs) == 0 or len(y_locs) == 0:
-                    continue
-
-                for x, y in zip(x_locs, y_locs):
-                    if y not in self.confident_samples.keys():
-                        self.confident_samples[y.item()] = [(batch['image'][x].unsqueeze(0).detach().cpu(), image_probs[x, y].item())]
-                    else:
-                        self.confident_samples[y.item()].append((x.detach().cpu(), image_probs[x, y].item()))
-
-                # Supervised training for one epoch
-                self.optim.zero_grad()
-                loss, acc = self.self_labelling_loss(image_logits, neighbor_logits)
-                loss.backward()
-                self.optim.step()
-
-                accuracy_meter.update(acc)
-                loss_meter.update(loss)
-
-                # Output
-                if i % int(0.1 * len(self.train_loader)) == 0:
-                    print("[Batch] {:4d}/{} - [Accuracy] {:.4f} - [CE Loss] {:.4f}".format(
-                        i, len(self.train_loader), acc, loss))
-
-                    print({k: len(v) for k, v in self.confident_samples.items()})
-
-                wandb.log({'Self-labelling cross entropy': loss})
-
-            # Epoch stats
-            cprint("\nEpoch {:3d}/{} - [Average loss] {:.4f} - [Average accuracy] {:.4f}".format(
-                epoch+1, epochs, loss_meter.mean, accuracy_meter.mean), 'green')
-            cprint("\n=======================================================================", 'green')
-
-            wandb.log({'Average self-labelling accuracy': accuracy_meter.mean})
-
-            if (epoch+1) % save_frequency == 0:
+            # Save models every 10 epochs
+            if (epoch+1) % 10 == 0:
                 torch.save(self.model.state_dict(), '../saved_data/models/self_labelling_model')
-                torch.save(self.optim.state_dict(), '../saved_data/models/optimizer')
-                print("\n[INFO] Saved model at epoch {}\n".format(epoch+1))
-
-        return self.model, self.confident_samples
+                torch.save(self.opt.state_dict(), '../saved_data/models/optimizer')

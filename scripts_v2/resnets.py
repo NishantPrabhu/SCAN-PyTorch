@@ -3,8 +3,6 @@ import os
 import numpy as np
 from sklearn import metrics
 from torchvision import models
-from logging_utils import Scalar
-
 import torch
 import torch.nn as nn
 import torch.nn.functional as F

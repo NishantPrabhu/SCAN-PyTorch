@@ -1,192 +1,123 @@
 
-"""
-Utility functions
-
-@author: Nishant Prabhu
-"""
-
-# Dependencies
-import os
-import pickle
-import random
-import numpy as np
-from PIL import Image
+import torch 
+import torch.nn.functional as F 
+import torchvision.transforms as T
+from torchvision import datasets 
 from tqdm import tqdm
-from termcolor import cprint
-
-import torch
-import torchvision
-from torch.utils.data import Dataset
-from torch.utils.data import DataLoader
+from augment import Augment
+import faiss
+import random
+import numpy as np 
 
 
 datasets = {
-    'cifar10': torchvision.datasets.CIFAR10,
-    'cifar100': torchvision.datasets.CIFAR100,
-    'stl10': torchvision.datasets.STL10
+    'cifar10': {'data': datasets.CIFAR10, 'n_classes': 10},
+    'cifar100': {'data': datasets.CIFAR100, 'n_classes': 100},
+    'stl10': {'data': datasets.STL10, 'n_classes': 10}
 }
 
-@torch.no_grad()
-def generate_embeddings(name, data, encoder, transform, save_root, regenerate=False):
-    """
-        Generates SimCLR feature vectors for each image in
-        unaugmented dataset.
-
-        Args:
-            data <?>
-                I don't remember what this is supposed to be, prolly a tensor
-            encoder <torch.nn.Module>
-                SimCLR encoder network from models.py
-            transform <torchvision.transforms>
-                Transformation pipeline for images
-            save_root <os.path>
-                Directory where pkl of generated vectors will be stored
-            regenerate <bool>
-                If set to True, generates the vectors again even if
-                they have already been saved at save_root
-
-        Returns:
-            Tensor of SimCLR vectors for each image in dataset
-    """
-
-    cprint("\n[INFO] Generating embeddings", 'yellow')
-    if not os.path.exists(save_root + 'simclr_{}_embeds'.format(name)) or regenerate:
-
-        vectors = []
-        device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-
-        for i in tqdm(range(len(data)), leave=False):
-            img = data[i][0]
-            img_tensor = transform(img).unsqueeze(0).to(device)
-            img_vector = encoder(img_tensor).detach().cpu()
-            vectors.append(img_vector)
-
-        # Convert to torch tensor for immediate use
-        tensors_ = torch.cat(vectors, dim=0)
-        torch.save(tensors_, save_root + 'simclr_{}_embeds'.format(name))
-    else:
-        print("Embeddings already exist at {}".format(save_root + 'simclr_{}_embeds'.format(name)))
-        print("If you wish to generate them again, set regenerate=True")
-        tensors_ = torch.load(save_root + 'simclr_{}_embeds'.format(name))
-
-    return tensors_
+norms = {
+    'cifar10': {'mean': [0.4914, 0.4822, 0.4465], 'std': [0.2023, 0.1994, 0.2010]},
+    'cifar100': {'mean': [0.5071, 0.4867, 0.4408], 'std': [0.2675, 0.2565, 0.2761]},
+    'stl10': {'mean': [0.485, 0.456, 0.406], 'std': [0.229, 0.224, 0.225]}
+}
 
 
-def find_neighbors(embeddings, k):
-    """
-        Finds k nearest neighbors of each embedding
+class NeighborsDataset(torch.utils.data.Dataset):
 
-        Args:
-            embeddings <torch.Tensor>
-                Tensor of shape (dataset_size, embedding_size)
-            k <int>
-                Number of neighbors to mine for each sample
-
-        Returns:
-            Tensor of shape (dataset_size, k) with indices
-            of k nearest neighbors of each sample
-    """
-    neighbor_indices = []
-
-    for i in range(embeddings.shape[0]):
-        sim_scores = embeddings @ embeddings[i].t()
-        idx = torch.topk(sim_scores, k+1, dim=0)[1][1:]
-        neighbor_indices.append(idx.reshape(1, -1))
-
-    retval = torch.cat(neighbor_indices, dim=0)
-    assert retval.shape == (embeddings.size(0), k), "Neighbors return shape error"
-
-    return retval
-
-
-def load_validation_data(name, transform):
-    """
-        Loads dataset from torchvision. Valid names are :
-            cifar10, cifar100, stl10
-    """
-    val_ = datasets[name](root='../saved_data/datasets/'+name, train=False, transform=transform, download=True)
-    return val_
-
-
-class NeighborsDataset(Dataset):
-
-    """
-        For each image (anchor) in the original dataset, K of its neighbors
-        are searched in SimCLR space and aggregated (making it K+1 images).
-        One of these K neighbors is randomly selected. Both the anchor and the
-        neighbor are transformed correctly and returned as sa dictionary
-
-        Args:
-            dataset <json like>
-                JSON object containing image metadata
-            embeddings <torch.Tensor>
-                Tensor of SimCLR embeddings for images in dataset
-            augment_fun <Augment obj>
-                Augmentation object from augment.py
-            transform <torchvision.transforms>
-                Transformation pipeline for image and augmentations
-            n_neighbors <int>
-                Number of nearest neighbors to mine for each sample
-
-        Return:
-            Read description above
-    """
-
-    def __init__(self, name, embedding_net, augment_fun, transforms, n_neighbors):
-
-        self.dataset = datasets[name](root='../saved_data/datasets/'+name, train=True, transform=None, download=True)
-        self.embeddings = generate_embeddings(name, self.dataset, embedding_net, transforms['standard'], save_root='../saved_data/other/', regenerate=False)
-        self.neighbor_indices = find_neighbors(self.embeddings, k=n_neighbors)
-        self.augment_fun = augment_fun
-        self.image_transform = transforms['standard']
-        self.augment_transform = transforms['augment']
+    def __init__(self, name, neighbors_idx):
+        super(NeighborsDataset, self).__init__()
+        self.data = datasets[name]['data'](root='../data/{}'.format(name), train=True, transform=None, download=True)
+        self.neighs = neighbors_idx
+        self.anchor_transform = T.RandomResizedCrop(size=32, scale=(0.08, 1.0), ratio=(0.75, 1.3333))
+        self.neighbor_transform = Augment(n=4)
+        self.tensor_transform = T.Compose([T.ToTensor(), T.Normalize(norms[name]['mean'], norms[name]['std'])])
 
     def __len__(self):
-        return len(self.dataset)
+        return len(self.data)
 
-    def __getitem__(self, idx):
-        return_obj = {}
-        sample = self.dataset[idx]
-        neighbors = self.neighbor_indices[idx]
+    def __getitem__(self, i):
+        anchor, label = self.data[i]
+        neighbor, _ = self.data[random.choice(self.neighs[i])]
+        anchor_ = self.tensor_transform(self.anchor_transform(anchor))
+        neighbor_ = self.tensor_transform(self.neighbor_transform(neighbor))
 
-        # Choose random neighbor
-        random_neighbor = neighbors[torch.randint(0, neighbors.size(0), (1,))]
-        neighbor_meta = self.dataset[random_neighbor]
-
-        return_obj['image'] = self.image_transform(self.augment_fun(sample[0]))
-        return_obj['neighbor'] = self.augment_transform(self.augment_fun(neighbor_meta[0]))
-        return_obj['label'] = sample[1]
-        return_obj['possible_neigbors'] = neighbors
-
-        return return_obj
+        return {'anchor': anchor_, 'neighbor': neighbor_, 'label': label}
 
 
-def generate_data_loaders(name, batch_size, n_neighbors, transforms, embedding_net, augment_fun):
-    """
-        Torch dataloaders for image dataset.
+class MemoryBank:
 
-        Args:
-            name <str>
-                One of cifar10, cifar100, stl10
-            embedding_net <torch.Tensor>
-                SimCLR network to generate embeddings
-            n_neighbors <int>
-                Number of neighbors to mine for each image
-            augment_fun <Augment obj>
-                Augmentation
-            cutout_fun <Cutout obj>
-                Cutout augmentation
-            transforms <torchvision.Transforms>
-                Dictionary of transformations for image and augmentations
+    """ Compiles dataset, generates dataloaders, generates embeddings """
 
-        Returns:
-            Train and validation data loaders
-    """
+    def __init__(self, size, dim, num_classes):
+        self.size = size
+        self.features = torch.FloatTensor(size, dim)
+        self.targets = torch.LongTensor(size)
+        self.dim = dim
+        self.num_classes = num_classes 
+        self.ptr = 0
 
-    train_dset = NeighborsDataset(name, embedding_net, augment_fun, transforms, n_neighbors)
-    val_dset = load_validation_data(name, transforms['standard'])
 
-    train_loader = DataLoader(train_dset, batch_size=batch_size, shuffle=True, num_workers=8)
-    val_loader = DataLoader(val_dset, batch_size=batch_size, shuffle=True, num_workers=8)
+    def mine_nearest_neighbors(self, k, compute_accuracy=True):
+        features = self.features.cpu().numpy()
+        dim = features.shape[1]
+        index = faiss.IndexFlatIP(dim)
+        index = faiss.index_cpu_to_all_gpus(index)
+        index.add(features)
+        _, idx = index.search(features, k+1)
 
-    return train_loader, val_loader
+        if compute_accuracy:
+            targets = self.targets.cpu().numpy()
+            neighbor_targets = np.take(targets, idx[:, 1:], axis=0) 
+            anchor_targets = np.repeat(targets.reshape(-1, 1), k, axis=1)
+            accuracy = (neighbor_targets == anchor_targets).mean()
+            return idx, accuracy
+        else:
+            return idx
+
+
+    def reset(self):
+        self.ptr = 0
+
+
+    def update(self, features, targets):
+        b = features.size(0)
+
+        if (b + self.ptr) <= self.size:
+            self.features[self.ptr : self.ptr+b].copy_(features.detach())
+            self.targets[self.ptr : self.ptr+b].copy_(targets.detach())
+            self.ptr += b
+        else:
+            split = self.size - self.ptr
+            self.features[self.ptr : self.size].copy_(features[:split].detach())
+            self.targets[self.ptr : self.size].copy_(targets[:split].detach())
+            self.reset()
+            self.features[self.ptr : self.ptr+b-split].copy_(features[split:].detach())
+            self.targets[self.ptr : self.ptr+b-split].copy_(targets[split:].detach())
+            self.ptr += b-split
+
+
+    def to(self, device):
+        self.features = self.features.to(device)
+        self.targets = self.targets.to(device)
+
+    def cpu(self):
+        self.to('cpu')
+
+    def cuda(self):
+        self.to('cuda') if torch.cuda.is_available() else self.to('cpu')
+
+
+class Scalar:
+
+    def __init__(self):
+        self.count = 0
+        self.sum = 0
+        self.mean = 0
+        self.last_value = None
+
+    def update(self, x):
+        self.last_value = x
+        self.count += 1
+        self.sum += x
+        self.mean = self.sum/self.count

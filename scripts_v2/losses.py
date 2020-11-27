@@ -1,28 +1,10 @@
 
-"""
-All loss functions in one place.
-
-Author: Nishant Prabhu
-"""
-
 import torch
+import torch.nn as nn 
 import torch.nn.functional as F
 
 
 def entropy(x, input_as_probabilities=True):
-    """
-        Shannon entropy of a tensor x averaged
-        along batch dimension.
-
-        Args:
-            x <torch.Tensor>
-                Tensor of shape (batch_size, num_clusters)
-
-        Returns:
-            float : Shannon entropy
-    """
-    # Data type checks
-    assert isinstance(x, torch.Tensor), f"x has to be torch.Tensor, got {type(x)}"
 
     if input_as_probabilities:
         x_ = torch.clamp(x, min=1e-10)
@@ -30,73 +12,65 @@ def entropy(x, input_as_probabilities=True):
     else:
         b = F.softmax(x, dim=1) * F.log_softmax(x, dim=1)
 
-    if len(b.size()) == 1:
-        return -b.sum()
-    elif len(b.size()) == 2:
+    if len(b.size()) == 2:
         return -b.sum(dim=1).mean()
+    elif len(b.size()) == 1:
+        return -b.sum()
     else:
-        raise ValueError("Entropy loss shape error")
+        raise NotImplementedError('entropy input shape error')
 
 
 class SCANLoss(torch.nn.Module):
 
-    def __init__(self, entropy_weight=2.0):
+    def __init__(self, entropy_weight=2):
         super(SCANLoss, self).__init__()
-        self.softmax = torch.nn.Softmax(dim=1)
-        self.bce = torch.nn.BCELoss()
         self.ew = entropy_weight
+        self.bce = nn.BCELoss()
+        self.softmax = nn.Softmax(dim=1)
 
     def forward(self, anchor_logits, neighbor_logits):
-        """
-        anchor_logits: shape (batch_size, num_classes)
-        neighbor_logits: shape (batch_size, num_classes)
-        """
         b, n = anchor_logits.size()
         anchor_probs = self.softmax(anchor_logits)
         neighbor_probs = self.softmax(neighbor_logits)
 
-        similarity = torch.bmm(anchor_probs.view(b, 1, n), neighbor_probs.view(b, n, 1)).squeeze()
-        ones = torch.ones_like(similarity)
-        consistency_loss = self.bce(similarity, ones)
+        correlation = torch.bmm(anchor_probs.view(b, 1, n), neighbor_probs.view(b, n, 1)).squeeze()
+        targets = torch.ones_like(correlation)
+        consistency_loss = self.bce(correlation, targets)
         entropy_loss = entropy(torch.mean(anchor_probs, 0), True)
-        total_loss = consistency_loss - self.ew * entropy_loss
+        loss = consistency_loss - self.ew * entropy_loss
 
-        return total_loss, consistency_loss, entropy_loss
+        return loss, consistency_loss, entropy_loss
 
 
-class MaskedCrossEntropyLoss(torch.nn.Module):
+class MaskedCELoss(torch.nn.Module):
 
     def __init__(self):
-        super(MaskedCrossEntropyLoss, self).__init__()
+        super(MaskedCELoss, self).__init__()
 
-    def forward(self, inp, trg, mask, weight, reduction='mean'):
+    def forward(self, inputs, targets, mask, weight):
         if not (mask != 0).any():
-            raise ValueError("Mask is all zeros")
+            raise ValueError('Mask is all zeros')
 
-        trg = torch.masked_select(trg, mask)
-        b, c = inp.size()
-        n = trg.size(0)
-        inp = torch.masked_select(inp, mask.view(b, 1)).view(n, c)
-        return F.cross_entropy(inp, trg, weight=weight, reduction=reduction)
+        target_masked = torch.masked_select(targets, mask)
+        b, c = inputs.size()
+        n = target_masked.size(0)
+        input_masked = torch.masked_select(inputs, mask.view(b, 1)).view(n, c)
+        return F.cross_entropy(input_masked, target_masked, weight=weight)
 
 
-class ConfidenceBasedCE(torch.nn.Module):
+class ConfidenceBasedCELoss(torch.nn.Module):
 
     def __init__(self, threshold=0.9, apply_class_balancing=True):
-        super(ConfidenceBasedCE, self).__init__()
-        self.thresh = threshold
-        self.softmax = torch.nn.Softmax(dim=1)
+        super(ConfidenceBasedCELoss, self).__init__()
+        self.threshold = threshold
         self.class_balance = apply_class_balancing
-        self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-        self.loss = MaskedCrossEntropyLoss()
-
+        self.softmax = nn.Softmax(dim=1)
+        self.loss = MaskedCELoss()
+    
     def forward(self, anchor_logits, augment_logits):
-        """
-        Computes loss only for logits whose probability is more than threshold
-        """
         anchor_probs = self.softmax(anchor_logits)
         max_prob, target = torch.max(anchor_probs, dim=1)
-        mask = max_prob > self.thresh
+        mask = max_prob > self.threshold
         b, c = anchor_probs.size()
         target_masked = torch.masked_select(target, mask.squeeze())
         n = target_masked.size(0)
@@ -105,12 +79,12 @@ class ConfidenceBasedCE(torch.nn.Module):
         if self.class_balance:
             idx, counts = torch.unique(target_masked, return_counts=True)
             freq = 1./(counts.float()/n)
-            weight = torch.ones(c).to(self.device)
+            weight = torch.ones(c).to(anchor_logits.device)
             weight[idx] = freq
         else:
             weight = None
 
-        loss = self.loss(augment_logits, target, mask, weight=weight, reduction='mean')
+        loss = self.loss(augment_logits, target, mask, weight=weight)
 
         # Accuracy computation
         masked_augment_logits = torch.masked_select(augment_logits, mask.view(b, 1)).view(n, c)
@@ -118,4 +92,7 @@ class ConfidenceBasedCE(torch.nn.Module):
         correct = masked_augment_preds.eq(target_masked.view_as(masked_augment_preds)).sum().item()
         acc = correct/n
 
-        return loss, acc
+        return loss, acc, target_masked
+
+
+
