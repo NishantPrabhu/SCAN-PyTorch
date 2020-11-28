@@ -1,3 +1,56 @@
+# network parameters
+# encoder
+enc:
+  name: resnet18
+  pretrained: False
+  # if pretrained is false. check https://arxiv.org/abs/1706.02677 for reference
+  zero_init_residual: False
+# projection head in simclr
+# NOTE: in dim is based on the backbone. ref: [resnet18/34: 512, resnet50/101/152: 2048]
+proj_head:
+  in_dim: 512 
+  out_dim: 128
+# classification head
+cls_head:
+  in_dim: 512
+  n_classes: 10
+
+# optimizer
+# one for simclr
+simclr_optim:
+  name: sgd
+  lr: 1.0
+  weight_decay: 0.000001
+# one for classification head (linear evaluation)
+cls_optim:
+  name: sgd
+  lr: 0.1
+  weight_decay: 0.0
+
+# lr scheduler
+# one for simclr training
+simclr_scheduler:
+  warmup_epochs: 10
+  name: cosin
+# one for the linear evaluation
+cls_scheduler:
+  name: cosin
+
+# criterion
+criterion:
+  normalize: True
+  temperature: 0.5
+
+dataset: cifar10
+data_root: data/cifar10 
+batch_size: 256
+num_workers: 4
+epochs: 1000
+# validation using MAP
+valid_every: 100
+# number of epochs to train for linear evaluation (Note: here the encoder is frozen)
+linear_eval_epochs: 100
+
 # transformations
 # transforms must be given in the order they need to be performed.
 # for reference to these given arguments check https://pytorch.org/docs/stable/torchvision/transforms.html
@@ -40,51 +93,3 @@ aug_transform:
   normalize:
     mean: [0.4914, 0.4824, 0.4467]
     std: [0.2471, 0.2435, 0.2616]
-  
-# dataloading
-dataset: cifar10
-data_root: data/cifar10 
-batch_size: 256
-num_workers: 4
-
-epochs: 1000
-val_epochs: 100
-valid_every: 100
-
-# model
-encoder:
-  name: resnet18
-  pretrained: False
-  # if pretrained is false. check https://arxiv.org/abs/1706.02677 for reference
-  zero_init_residual: False
-
-# NOTE: in dim is based on the backbone. ref: [resnet18/34: 512, resnet50/101/152: 2048]
-proj_head:
-  in_dim: 512 
-  out_dim: 128
-
-cls_head:
-  in_dim: 512
-  n_classes: 10
-
-# optimizer
-simclr_optim:
-  name: sgd
-  lr: 1.0
-  weight_decay: 0.000001
-cls_optim:
-  name: sgd
-  lr: 0.1
-  weight_decay: 0.0
-
-# lr scheduler (if any)
-simclr_scheduler:
-  warmup_epochs: 10
-  name: cosin
-cls_scheduler:
-  name: cosin
-
-# criterion
-criterion:
-  normalize: True
-  temperature: 0.5

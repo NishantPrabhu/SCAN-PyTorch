@@ -7,6 +7,8 @@ import utils
 import losses
 from tqdm import tqdm
 import numpy as np
+import os
+from sklearn.metrics.pairwise import euclidean_distances
 
 BACKBONES = {
     "resnet18": models.resnet18
@@ -74,30 +76,31 @@ class ClassificationHead(nn.Module):
         self.W1 = nn.Linear(in_dim, n_classes)
     
     def forward(self, x):
-        return self.W1(x)
+        return F.log_softmax(self.W1(x), -1)
     
 # simclr model
 class SimCLR():
     def __init__(self, config):
         self.config = config
-        # setup device (not multi-gpu)
-        self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         print(f"found device {torch.cuda.get_device_name(0)}")
         
-        # define model
-        self.enc = Encoder(**config["encoder"]).to(self.device)
+        # model - encoder and projection head
+        self.enc = Encoder(**config["enc"]).to(self.device)
+        utils.print_network(model=self.enc, name="Encoder")
         self.proj_head = ProjectionHead(**config["proj_head"]).to(self.device)
+        utils.print_network(model=self.proj_head, name="Project Head")
         self.proj_head.apply(init_weights)
         
         # optimizer, scheduler, criterion
         self.lr = config["simclr_optim"]["lr"]
         self.optim = utils.get_optim(config=config["simclr_optim"], parameters=list(self.enc.parameters())+list(self.proj_head.parameters()))
-        self.scheduler, self.warmup_epochs = utils.get_scheduler(config={**config["simclr_scheduler"], "epochs": config["epochs"]}, optim=self.optim)
+        self.lr_scheduler, self.warmup_epochs = utils.get_scheduler(config={**config["simclr_scheduler"], "epochs": config["epochs"]}, optim=self.optim)
         self.criterion = losses.SimclrCriterion(config["batch_size"], **config["criterion"])
-        
-        self.val_best = 0
-        
+    
+    # train one step (called from trainer class)
     def train_one_step(self, data):
+        
         img_i, img_j = data["i"].to(self.device), data["j"].to(self.device)
         z_i = self.proj_head(self.enc(img_i))
         z_j = self.proj_head(self.enc(img_j))
@@ -107,65 +110,93 @@ class SimCLR():
         loss.backward()
         self.optim.step()
         
-        return {"loss": loss.item()}
+        return {"train loss": loss.item()}
     
-    def validate(self, train_loader, val_loader):
+    @staticmethod
+    def calculate_MAP(z, label):
+        precision = []
+        for i in range(len(z)):
+            score = np.argsort(euclidean_distances(z[i].reshape(1,-1), z), axis=0)[0,0:100]
+            p,c = 0,0
+            for j in range(1, len(score)):
+                if label[i] == label[score[j]]:
+                    c += 1
+                    p += c/j
+            precision.append(p/(c+1e-5))
+        return np.mean(precision)
+
+    # MAP based validation (quick)
+    def validate(self, val_loader):
+        # calculate val MAP
+        pbar = tqdm(total=len(val_loader))
+        f_vecs, labels = [], []
+        for data in val_loader:
+            img, target = data["val_img"].to(self.device), data["target"]
+            with torch.no_grad():
+                z = self.proj_head(self.enc(img))
+            f_vecs.extend(z.cpu().detach().numpy())
+            labels.extend(target.numpy())
+            pbar.update(1)
+        pbar.close()
+        f_vecs, labels = np.array(f_vecs), np.array(labels)
+        val_MAP = SimCLR.calculate_MAP(f_vecs, labels)
+        
+        return {"val MAP": val_MAP}
+
+    def linear_eval(self, train_loader, val_loader, output_dir):
+        # initialize classification head
         cls_head = ClassificationHead(**self.config["cls_head"]).to(self.device)
         optim = utils.get_optim(config=self.config["cls_optim"], parameters=cls_head.parameters())
-        scheduler, _ = utils.get_scheduler(config={**self.config["cls_scheduler"], "epochs": self.config["val_epochs"]}, optim=optim)
-        criterion = nn.CrossEntropyLoss()
+        scheduler, _ = utils.get_scheduler(config={**self.config["cls_scheduler"], "epochs": self.config["linear_eval_epochs"]}, optim=optim)
         
-        pbar = tqdm(total=self.config["val_epochs"])
-        patience = 0
-        best = 0
-        for epoch in range(self.config["val_epochs"]):
+        # train and validate freezing encoder
+        best_cls = 0
+        pbar = tqdm(total=self.config["linear_eval_epochs"])
+        for epoch in range(self.config["linear_eval_epochs"]):
+            # train
             loss_cntr, acc_cntr = [], []
             for data in train_loader:
-                img, target = data["train"].to(self.device), data["target"].to(self.device)
+                img, target = data["train_img"].to(self.device), data["target"].to(self.device)
                 with torch.no_grad():
                     h = self.enc(img)
                 pred = cls_head(h)
-                loss = criterion(pred, target)
+                loss = F.nll_loss(pred, target)
+                optim.zero_grad()
                 loss.backward()
                 optim.step()
-                
                 pred_label = pred.argmax(1)
                 acc = (pred_label==target).sum()/target.shape[0]
-                
                 loss_cntr.append(loss.item())
                 acc_cntr.append(acc.item())
-            pbar.set_description(f"cls head train epoch: {epoch}, loss: {round(np.mean(loss_cntr), 4)}, acc: {round(np.mean(acc_cntr), 4)}")
-            if np.mean(acc_cntr) > best:
-                best = np.mean(acc_cntr)
-                patience = 0
-            else:
-                patience += 1
-            if patience > 10:
-                break
-            scheduler.step()
-            pbar.update(1)
-        pbar.close()
-        train_acc = np.mean(acc_cntr)
-        
-        acc_cntr = []
-        pbar = tqdm(total=len(val_loader))
-        for data in val_loader:
-            img, target = data["val"].to(self.device), data["target"].to(self.device)
-            with torch.no_grad():
-                h = self.enc(img)
+            train_loss, train_acc = np.mean(loss_cntr), np.mean(acc_cntr)
+            # validate
+            loss_cntr, acc_cntr = [], []
+            for data in val_loader:
+                img, target = data["val_img"].to(self.device), data["target"].to(self.device)
+                with torch.no_grad():
+                    h = self.enc(img)
                 pred = cls_head(h)
-            pred_label = pred.argmax(1)
-            acc = (pred_label==target).sum()/target.shape[0]
-            acc_cntr.append(acc.item())
+                loss = F.nll_loss(pred, target)
+                optim.zero_grad()
+                loss.backward()
+                optim.step()
+                pred_label = pred.argmax(1)
+                acc = (pred_label==target).sum()/target.shape[0]
+                loss_cntr.append(loss.item())
+                acc_cntr.append(acc.item())
+            val_loss, val_acc = np.mean(loss_cntr), np.mean(acc_cntr)
+            
+            pbar.set_description(f"Epoch: {epoch}, train - loss: {round(train_loss,2)}, acc: {round(train_acc,2)}, val - loss: {round(val_loss,2)}, acc: {round(val_acc,2)}")
             pbar.update(1)
-        pbar.set_description(f"cls head test acc: {round(np.mean(acc_cntr), 4)}")
-        test_acc = np.mean(acc_cntr)
+            scheduler.step()
+            
+            if val_acc > best_cls:
+                best_cls = val_acc
+                torch.save(cls_head.state_dict(), os.path.join(output_dir, "cls_head.ckpt"))
         pbar.close()
-        if test_acc > self.val_best:
-            self.val_best = test_acc
-            return {"train_acc": train_acc, "test_acc": test_acc}, True
-        else:
-            return {"train_acc": train_acc, "test_acc": test_acc}, False
+        return {"train acc": train_acc, "best val acc": best_cls}
     
-    def save(self, file_name):
-        torch.save(self.enc.state_dict(), file_name)
+    # save encoder and projection head
+    def save(self, output_dir, prefix):
+        torch.save(self.enc.state_dict(), os.path.join(output_dir, f"{prefix}_encoder.ckpt"))
+        torch.save(self.proj_head.state_dict(), os.path.join(output_dir, f"{prefix}_proj_head.ckpt"))
