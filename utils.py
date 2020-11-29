@@ -34,10 +34,10 @@ def init_expt(args, seed=420):
     [logging.root.removeHandler(handler) for handler in logging.root.handlers[:]]
     logging.basicConfig(
         level=logging.INFO, format='%(message)s',
-        handlers=[logging.FileHandler(os.path.join(output_dir, 'trainlogs.txt')), logging.StreamHandler()]
+        handlers=[logging.FileHandler(os.path.join(output_dir, 'trainlogs.txt'))]
     )
 
-    logging.info(f"Logging at {output_dir}")
+    print(f"Logging at {output_dir}")
     
     # open config file and write
     config = open_config(args.config)
@@ -48,22 +48,22 @@ def init_expt(args, seed=420):
 
 # pretty print network
 def print_network(model, name=""):
-    logging.info(name.rjust(35))
-    logging.info('-'*70)
-    logging.info('{:>25} {:>27} {:>15}'.format('Layer.Parameter', 'Shape', 'Param'))
-    logging.info('-'*70)
+    print(name.rjust(35))
+    print('-'*70)
+    print('{:>25} {:>27} {:>15}'.format('Layer.Parameter', 'Shape', 'Param'))
+    print('-'*70)
 
     for param in model.state_dict():
         p_name = param.split('.')[-2]+'.'+param.split('.')[-1]
         if p_name[:2] != 'BN' and p_name[:2] != 'bn': # not printing batchnorm layers
-            logging.info(
+            print(
                 '{:>25} {:>27} {:>15}'.format(
                     p_name,
                     str(list(model.state_dict()[param].squeeze().size())),
                     '{0:,}'.format(np.product(list(model.state_dict()[param].size())))
                 )
             )
-    logging.info('-'*70)
+    print('-'*70)
 
 # get optimizer
 def get_optim(config, parameters):

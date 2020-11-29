@@ -12,7 +12,7 @@ import numpy as np
 import torch
 
 def train_one_epoch(epoch, train_loader, model, output_dir):
-    pbar = tqdm(total=len(train_loader))
+    pbar = tqdm(total=len(train_loader), desc=f"train epoch - {epoch}")
     epoch_metrics = {}
     for indx, data in enumerate(train_loader):
         step = epoch*len(train_loader) + indx
@@ -24,17 +24,22 @@ def train_one_epoch(epoch, train_loader, model, output_dir):
                 epoch_metrics[key].append(value)
         wandb.log({**metrics, "train step": step})
         pbar.update(1)
-    pbar.close()
+    
+    # logs
+    log = f"train epoch - {epoch} "
+    for key, value in epoch_metrics.items():
+        log += f"{key} - {round(np.mean(value), 4)} "
+    pbar.set_description(log)
+    logging.info(log)
     wandb.log({"lr": model.optim.param_groups[0]["lr"], "epoch": epoch})
+    pbar.close()
+
+    # step learning rate
     if epoch+1 <= model.warmup_epochs:
         model.optim.param_groups[0]["lr"] = (epoch+1)/model.warmup_epochs*model.lr
-    elif model.scheduler is not None:
-        model.scheduler.step()
+    elif model.lr_scheduler is not None:
+        model.lr_scheduler.step()
 
-    log = f"\n"
-    for key, value in epoch_metrics.items():
-        log += f"{key}: {round(np.mean(value), 4)} "
-    logging.info(log+"\n")
     model.save(output_dir, "last")
 
 if __name__ == "__main__":
@@ -67,29 +72,28 @@ if __name__ == "__main__":
         val_loader = DataLoader(val_dataset, batch_size=config["batch_size"], num_workers=config["num_workers"], shuffle=False)
         
         best = 0
+        print("\n")
         for epoch in range(config["epochs"]):
-            logging.info(f"\nEpoch: {epoch}\n")
             train_one_epoch(epoch, simclr_loader, simclr, output_dir)
             if epoch%config["valid_every"] == 0:
-                logging.info(f"\nValidation\n")
-                metrics = simclr.validate(val_loader)
+                metrics = simclr.validate(epoch, val_loader)
                 wandb.log({**metrics, "val epoch": epoch})
-                log = f"\n"
+                log = f"valid epoch - {epoch} "
                 for key, value in metrics.items():
-                    log += f"{key}: {round(value, 4)} "
-                logging.info(log+"\n")
-                if metrics["val MAP"] > best:
-                    best = metrics["val MAP"]
+                    log += f"{key} - {round(value, 4)} "
+                logging.info(log)
+                if metrics["acc"] > best:
+                    best = metrics["acc"]
                     simclr.save(output_dir, "best")
-        logging.info("Training complete. Performing Linear evaluation")
+        print("\nTraining complete. Performing Linear evaluation")
         # load the best encoder model
         simclr.enc.load_state_dict(torch.load(os.path.join(output_dir, "best_encoder.ckpt")))
         metrics = simclr.linear_eval(train_loader, val_loader, output_dir)
         log = f"\nLinear Evaluation:"
         for key, value in metrics.items():
-            log += f" {key}: {round(value, 4)}"
-        logging.info(log+"\n")
-        logging.info("\nTraining Complete. Exitting")
+            log += f" {key} - {round(value, 4)}"
+        logging.info(log)
+        print("\nTraining Complete. Exitting")
     
     else:
         raise NotImplementedError()    

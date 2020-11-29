@@ -8,7 +8,7 @@ import losses
 from tqdm import tqdm
 import numpy as np
 import os
-from sklearn.metrics.pairwise import euclidean_distances
+from sklearn.metrics.pairwise import cosine_distances
 
 BACKBONES = {
     "resnet18": models.resnet18
@@ -83,7 +83,7 @@ class SimCLR():
     def __init__(self, config):
         self.config = config
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        print(f"found device {torch.cuda.get_device_name(0)}")
+        print(f"\nfound device {torch.cuda.get_device_name(0)}\n")
         
         # model - encoder and projection head
         self.enc = Encoder(**config["enc"]).to(self.device)
@@ -110,38 +110,35 @@ class SimCLR():
         loss.backward()
         self.optim.step()
         
-        return {"train loss": loss.item()}
+        return {"loss": loss.item()}
     
+    # calculate acc
     @staticmethod
-    def calculate_MAP(z, label):
-        precision = []
-        for i in range(len(z)):
-            score = np.argsort(euclidean_distances(z[i].reshape(1,-1), z), axis=0)[0,0:100]
-            p,c = 0,0
-            for j in range(1, len(score)):
-                if label[i] == label[score[j]]:
-                    c += 1
-                    p += c/j
-            precision.append(p/(c+1e-5))
-        return np.mean(precision)
+    def calculate_acc(z, targets, topk=20):
+        indices = np.argsort(cosine_distances(z,z), axis=1)[:,0:topk+1]
+        anchor_targets = np.repeat(targets.reshape(-1,1), topk, axis=1)
+        neighbor_targets = np.take(targets, indices[:,1:], axis=0)
+        accuracy = np.mean(neighbor_targets == anchor_targets)
+        return accuracy
 
-    # MAP based validation (quick)
-    def validate(self, val_loader):
-        # calculate val MAP
-        pbar = tqdm(total=len(val_loader))
+    # acc based validation (quick)
+    def validate(self, epoch, val_loader):
+        # calculate val acc
+        pbar = tqdm(total=len(val_loader), desc=f"val epoch - {epoch}")
         f_vecs, labels = [], []
         for data in val_loader:
             img, target = data["val_img"].to(self.device), data["target"]
             with torch.no_grad():
                 z = self.proj_head(self.enc(img))
+            z = F.normalize(z, p=2, dim=-1)
             f_vecs.extend(z.cpu().detach().numpy())
             labels.extend(target.numpy())
             pbar.update(1)
-        pbar.close()
         f_vecs, labels = np.array(f_vecs), np.array(labels)
-        val_MAP = SimCLR.calculate_MAP(f_vecs, labels)
-        
-        return {"val MAP": val_MAP}
+        val_acc = SimCLR.calculate_acc(f_vecs, labels)
+        pbar.set_description(f"valid epoch: {epoch} acc: {round(val_acc, 4)}")
+        pbar.close()
+        return {"acc": val_acc}
 
     def linear_eval(self, train_loader, val_loader, output_dir):
         # initialize classification head
@@ -186,7 +183,7 @@ class SimCLR():
                 acc_cntr.append(acc.item())
             val_loss, val_acc = np.mean(loss_cntr), np.mean(acc_cntr)
             
-            pbar.set_description(f"Epoch: {epoch}, train - loss: {round(train_loss,2)}, acc: {round(train_acc,2)}, val - loss: {round(val_loss,2)}, acc: {round(val_acc,2)}")
+            pbar.set_description(f"Epoch - {epoch} train: loss - {round(train_loss,2)} acc - {round(train_acc,2)} val: loss - {round(val_loss,2)} acc - {round(val_acc,2)}")
             pbar.update(1)
             scheduler.step()
             
