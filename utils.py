@@ -70,6 +70,8 @@ def get_optim(config, parameters):
     name = config.get("name", "sgd")
     if name == "sgd":
         return optim.SGD(parameters, lr=config["lr"], weight_decay=config["weight_decay"], momentum=0.9, nesterov=True)
+    elif name == "adam":
+        return optim.Adam(parameters, lr=config["lr"], weight_decay=config["weight_decay"])
     else:
         raise NotImplementedError(f"{name} not setup")
 
@@ -87,5 +89,5 @@ def get_scheduler(config, optim):
             raise NotImplementedError(f"{name} not setup")
         return scheduler, warmup_epochs
     else:
-        None, warmup_epochs
+        return None, warmup_epochs
     

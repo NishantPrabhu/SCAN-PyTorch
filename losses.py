@@ -57,3 +57,47 @@ class SimclrCriterion(nn.Module):
 
         loss = F.cross_entropy(logits, self.labels.to(logits.device))
         return loss
+
+class ScanCriterion(nn.Module):
+    def __init__(self, entropy_weight):
+        super(ScanCriterion, self).__init__()
+        self.entropy_weight = entropy_weight
+    
+    def forward(self, anchors, neighbours):
+        # compute probabilities
+        anchors_prob = F.softmax(anchors, dim=1)
+        neighbours_prob = F.softmax(neighbours, dim=1)
+        
+        # consistency loss
+        similarity = torch.bmm(anchors_prob.unsqueeze(1), neighbours_prob.unsqueeze(2)).squeeze()
+        consistency_loss = F.binary_cross_entropy(similarity, torch.ones_like(similarity))
+        
+        # entropy loss in the batch
+        p = torch.clamp(torch.mean(anchors_prob, 0), min=1e-8)
+        entropy_loss = -(p*torch.log(p)).sum()
+        
+        loss = consistency_loss - self.entropy_weight*entropy_loss
+        
+        return loss, consistency_loss, entropy_loss
+
+class SelflabelCriterion(nn.Module):
+    def __init__(self, confidence):
+        super(SelflabelCriterion, self).__init__()
+        self.confidence = confidence
+
+    def forward(self, anchors, anchors_aug):
+        anchors_prob = F.softmax(anchors, dim=1)
+        max_prob, target = torch.max(anchors_prob, dim=1)
+        mask = max_prob > self.confidence
+        
+        batch, n_cls = anchors_prob.shape
+        
+        target_masked = torch.masked_select(target, mask.squeeze())
+        indx, counts = torch.unique(target_masked, return_counts=True)
+        freq = anchors.shape[0]/counts.float()
+        weight = torch.ones(anchors.shape[1]).cuda()
+        weight[indx] = freq
+        
+        input_masked = torch.masked_select(anchors_aug, mask.view(batch, 1)).view(target_masked.shape[0], n_cls)
+        loss = F.cross_entropy(input_masked, target_masked, weight=weight, reduction="mean")
+        return loss
