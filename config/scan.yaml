@@ -1,0 +1,57 @@
+# network parameters
+# encoder
+enc:
+  name: resnet18
+# clustering head
+cluster_head:
+  in_dim: 512
+  n_clusters: 10
+  n_heads: 1
+simclr_save: 2020-11-29_11-16
+
+# optimizer
+scan_optim: 
+  name: adam
+  lr: 0.0001
+  weight_decay: 0.0001
+# lr scheduler
+scan_scheduler:
+  warmup_epochs: 0
+  name: NULL
+
+# criterion
+criterion:
+  entropy_weight: 5.0
+
+# transformations
+# transforms must be given in the order they need to be performed.
+# for reference to these given arguments check https://pytorch.org/docs/stable/torchvision/transforms.html
+aug_transform:
+  random_flip:
+  random_crop: 
+    size: [32, 32]
+  rand_aug:
+    n_aug: 4
+  to_tensor:
+  normalize:
+    mean: [0.4914, 0.4824, 0.4467]
+    std: [0.2471, 0.2435, 0.2616]
+  cutout:
+    n_cuts: 1
+    max_len: 16
+
+valid_transform:
+  center_crop: 
+    size: [32, 32]
+  to_tensor:
+  normalize:
+    mean: [0.4914, 0.4824, 0.4467]
+    std: [0.2471, 0.2435, 0.2616]
+
+dataset: cifar10
+data_root: data/cifar10 
+batch_size: 128
+num_workers: 4
+epochs: 100
+# validation using MAP
+valid_every: 10
