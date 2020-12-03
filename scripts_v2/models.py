@@ -6,46 +6,48 @@ from torchvision import models
 from resnets import resnet18, resnet50
 
 
-base_models = {
+BACKBONES = {
     'resnet18': models.resnet18,
     'resnet34': models.resnet34,
     'resnet50': models.resnet50
 }
 
 
-class SimCLR(torch.nn.Module):
+class SimCLR(nn.Module):
 
-    def __init__(self, name="", feature_dim=128):
+    def __init__(self, name="resnet18", pretrained=False, zero_init_residual=False):
         super(SimCLR, self).__init__()
-        assert name in base_models.keys(), 'name should be one of resnet18, resnet34, resnet50'
+        assert name in list(BACKBONES.keys())
+        # start layers
+        conv0 = nn.Conv2d(3, 64, kernel_size=3, stride=1, padding=1, bias=False)
+        BN1 = nn.BatchNorm2d(64)
+        ReLU1 = nn.ReLU(inplace=True)
         
-        conv1 = nn.Conv2d(3, 64, kernel_size=3, stride=1, padding=1, bias=False)
-        bn1 = nn.BatchNorm2d(64)
-        maxpool = nn.MaxPool2d(kernel_size=2, stride=2, padding=1)
-        resnet = base_models[name](pretrained=False)
+        # backbone
+        resnet = BACKBONES[name](pretrained=pretrained)
         backbone = list(resnet.children())
+        self.backbone = nn.Sequential(conv0, BN1, ReLU1, *backbone[4:len(backbone)-1])
 
-        self.backbone = nn.Sequential(conv1, bn1, nn.ReLU(), maxpool, *backbone[4:len(backbone)-1])
-
-        for m in self.backbone.modules():
-            if isinstance(m, nn.Conv2d):
-                nn.init.kaiming_normal_(m.weight, mode='fan_out', nonlinearity='relu')
-            elif isinstance(m, (nn.BatchNorm2d, nn.GroupNorm)):
-                nn.init.constant_(m.weight, 1)
-                nn.init.constant_(m.bias, 0)
-
-        self.flatten = nn.Flatten()
-        self.head = nn.Sequential(
-            nn.Linear(resnet.fc.in_features, 512),
-            nn.ReLU(),
-            nn.Linear(512, feature_dim)
-        )
+        # initialise weights if not pretrained
+        if pretrained == False:
+            for m in self.backbone.modules():
+                if isinstance(m, nn.Conv2d):
+                    nn.init.kaiming_normal_(m.weight, mode='fan_out', nonlinearity='relu')
+                elif isinstance(m, (nn.BatchNorm2d, nn.GroupNorm)):
+                    nn.init.constant_(m.weight, 1)
+                    nn.init.constant_(m.bias, 0)
+            
+            # reference: https://arxiv.org/abs/1706.02677
+            if zero_init_residual:
+                for m in self.backbone.modules():
+                    if isinstance(m, models.resnet.Bottleneck):
+                        nn.init.constant_(m.bn3.weight, 0)
+                    if isinstance(m, models.resnet.BasicBlock):
+                        nn.init.constant_(m.bn2.weight, 0)
 
     def forward(self, x):
         out = self.backbone(x)
-        out = self.flatten(out)
-        out = self.head(out)
-        out = F.normalize(out, dim=1)
+        out = torch.flatten(out, 1)
         return out
 
 
@@ -92,7 +94,12 @@ class ContrastiveModel(torch.nn.Module):
                 nn.Linear(self.backbone_dim, feature_dim)
             )
 
-    def forward(self, x):
-        out = self.contrastive_head(self.backbone(x))
-        out = F.normalize(out, dim=1)
-        return out
+    def forward(self, x, forward_pass='full'):
+        if forward_pass == 'full':
+            out = self.contrastive_head(self.backbone(x))
+            out = F.normalize(out, dim=1)
+            return out
+        elif forward_pass == 'backbone':
+            out = self.backbone(x)
+            out = F.normalize(out, dim=1)
+            return out
