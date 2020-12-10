@@ -10,13 +10,17 @@ import torch
 import torch.nn as nn 
 import torch.nn.functional as F
 
+
 class SupervisedLoss(nn.Module):
+
     def __init__(self):
         super(SupervisedLoss, self).__init__()
+    
     def forward(self, pred, target):
         log_prob = F.log_softmax(pred, dim=1)
         loss = F.nll_loss(log_prob, target)
         return loss
+
 
 class SimclrLoss(nn.Module):
 
@@ -43,22 +47,22 @@ class SimclrLoss(nn.Module):
         logits_jj = torch.mm(zj_norm, zj_norm.t()) / self.temperature
 
         # Positive logits
-        logits_ij_pos = logits_ij[torch.logical_not(mask)]                  # Shape (N,)
-        logits_ji_pos = logits_ji[torch.logical_not(mask)]                  # Shape (N,)
+        logits_ij_pos = logits_ij[torch.logical_not(mask)]                      # Shape (N,)
+        logits_ji_pos = logits_ji[torch.logical_not(mask)]                      # Shape (N,)
 
         # Negative logits
-        logits_ii_neg = logits_ii[mask].reshape(bs, -1)                     # Shape (N, N-1)
-        logits_ij_neg = logits_ij[mask].reshape(bs, -1)                     # Shape (N, N-1)
-        logits_ji_neg = logits_ji[mask].reshape(bs, -1)                     # Shape (N, N-1)
-        logits_jj_neg = logits_jj[mask].reshape(bs, -1)                     # Shape (N, N-1)
+        logits_ii_neg = logits_ii[mask].reshape(bs, -1)                         # Shape (N, N-1)
+        logits_ij_neg = logits_ij[mask].reshape(bs, -1)                         # Shape (N, N-1)
+        logits_ji_neg = logits_ji[mask].reshape(bs, -1)                         # Shape (N, N-1)
+        logits_jj_neg = logits_jj[mask].reshape(bs, -1)                         # Shape (N, N-1)
 
         # Combine
-        pos = torch.cat((logits_ij_pos, logits_ji_pos), dim=0).unsqueeze(1) # Shape (2N, 1)
-        neg_i = torch.cat((logits_ii_neg, logits_ij_neg), dim=1)            # Shape (N, 2N-2)
-        neg_j = torch.cat((logits_ji_neg, logits_jj_neg), dim=1)            # Shape (N, 2N-2)
-        neg = torch.cat((neg_i, neg_j), dim=0)                              # Shape (2N, 2N-2)  
+        pos = torch.cat((logits_ij_pos, logits_ji_pos), dim=0).unsqueeze(1)     # Shape (2N, 1)
+        neg_i = torch.cat((logits_ii_neg, logits_ij_neg), dim=1)                # Shape (N, 2N-2)
+        neg_j = torch.cat((logits_ji_neg, logits_jj_neg), dim=1)                # Shape (N, 2N-2)
+        neg = torch.cat((neg_i, neg_j), dim=0)                                  # Shape (2N, 2N-2)  
         
-        logits = torch.cat((pos, neg), dim=1)                               # Shape (2N, 2N-1)
+        logits = torch.cat((pos, neg), dim=1)                                   # Shape (2N, 2N-1)
         loss = F.cross_entropy(logits, labels)
         return loss
 

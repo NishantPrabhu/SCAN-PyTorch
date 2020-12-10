@@ -172,6 +172,7 @@ class SimCLR:
         clf_head = models.ClassificationHead(in_dim=self.encoder.backbone_dim, n_classes=self.config['dataset']['n_classes'])
         clf_optim = setup_utils.get_optimizer(**self.config['clf_optimizer'], params=clf_head.parameters())
         clf_scheduler, _ = setup_utils.get_scheduler(**self.config['clf_scheduler'], optimizer=clf_optim)
+        criterion = losses.SupervisedLoss()
         done_epochs = 0
 
         # If a checkpoint exists, load it
@@ -202,7 +203,7 @@ class SimCLR:
                 
                 # Loss and update
                 pred = clf_head(h)
-                loss = F.nll_loss(pred, target, reduction='mean')
+                loss = criterion(pred, target)
                 clf_optim.zero_grad()
                 loss.backward()
                 clf_optim.step()
@@ -220,9 +221,11 @@ class SimCLR:
                 img, target = batch['img'].to(self.device), batch['target']
                 with torch.no_grad():
                     h = self.encoder(img)
+                
                 # Loss
                 pred = clf_head(h)
                 loss = F.nll_loss(pred, target, reduction='mean')
+                
                 # Accuracy
                 correct = pred.eq(target.view_as(pred)).sum().item()
                 val_acc.append(correct)
