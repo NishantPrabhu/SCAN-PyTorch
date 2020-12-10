@@ -85,8 +85,9 @@ class NeighborDataset:
     def __len__(self):
         return len(self.img_dataset)
 
-<<<<<<< Updated upstream
+
 def get_dataloader(config, dataset, weigh=False, shuffle=False):
+    
     if weigh:
         weights = sample_weights(dataset.targets)
         sampler = WeightedRandomSampler(weights)
@@ -94,19 +95,3 @@ def get_dataloader(config, dataset, weigh=False, shuffle=False):
     else:
         return DataLoader(dataset, batch_size=config['batch_size'], num_workers=config['num_workers'], shuffle=shuffle)
 
-=======
-
-class Scalar:
-
-    def __init__(self):
-        self.count = 0
-        self.value = 0
-        self.sum = 0
-        self.mean = 0
-
-    def update(self, x):
-        self.count += 1
-        self.value = x
-        self.sum += x
-        self.mean = self.sum/self.count
->>>>>>> Stashed changes
