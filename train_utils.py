@@ -16,10 +16,32 @@ import data_utils
 import models 
 import losses
 from tqdm import tqdm 
-from termcolor import cprint
 import numpy as np 
 import wandb
 import faiss
+
+
+# For color printing
+pallete = {
+    "default" : "\x1b[39m",
+    "black" : "\x1b[30m",
+    "red" : "\x1b[31m",
+    "green" : "\x1b[32m",
+    "yellow" : "\x1b[33m",
+    "blue" : "\x1b[34m",
+    "magenta" : "\x1b[35m",
+    "cyan" : "\x1b[36m",
+    "lightgray" : "\x1b[37m",
+    "darkgray" : "\x1b[90m",
+    "lightred" : "\x1b[91m",
+    "lightgreen" : "\x1b[92m",
+    "lightyellow" : "\x1b[93m",
+    "lightblue" : "\x1b[94m",
+    "lightmagenta" : "\x1b[95m",
+    "lightcyan" : "\x1b[96m",
+    "white" : "\x1b[97m",
+    "END" : "\033[0m"
+}
 
 
 def init_weights(m):
@@ -66,22 +88,22 @@ class SimCLR:
         self.config = config
         self.output_dir = output_dir
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-        cprint("\n[INFO] Device found: {}".format(torch.cuda.get_device_name(0)), 'yellow')
+        print("\n{}[INFO] Device found: {}{}".format(pallete['yellow'], torch.cuda.get_device_name(0), pallete['end']))
 
         # Models 
-        self.encoder = models.Encoder(**config['simclr_encoder']).to(self.device)
+        self.encoder = models.Encoder(**config['encoder']).to(self.device)
         setup_utils.print_network(self.encoder, 'Encoder')
-        self.proj_head = models.ProjectionHead(**config['simclr_projection_head']).to(self.device)
+        self.proj_head = models.ProjectionHead(**config['projection_head']).to(self.device)
         setup_utils.print_network(self.proj_head, 'Projection Head')
         self.proj_head.apply(init_weights)
 
         # Optimizer, scheduler and criterion
         self.optim = setup_utils.get_optimizer(
-            config=config['simclr_optim'], 
+            config=config['optimizer'], 
             params=list(self.encoder.parameters)+list(self.proj_head.parameters())
         )
         self.lr_scheduler, self.warmup_epochs = setup_utils.get_scheduler(
-            config={**config['simclr_scheduler'], 'epochs': config['epochs']},
+            config={**config['scheduler'], 'epochs': config['epochs']},
             optimizer=self.optim
         )
         self.criterion = losses.SimclrLoss(config['batch_size'], **config['simclr_criterion'])
@@ -119,7 +141,7 @@ class SimCLR:
 
 
     def validate(self, epoch, val_loader):
-        """ Niehgbor mining accuracies wrapper function """
+        """ Neighbor mining accuracies wrapper function """
 
         pbar = tqdm(total=len(val_loader), desc='Val epoch {}'.format(epoch))
         fvecs, labels = [], []
@@ -148,14 +170,14 @@ class SimCLR:
         enc_name = self.config['encoder']['name']
 
         clf_head = models.ClassificationHead(in_dim=self.encoder.backbone_dim, n_classes=self.config['dataset']['n_classes'])
-        clf_optim = setup_utils.get_optimizer(**self.config['clf_optim'], params=clf_head.parameters())
+        clf_optim = setup_utils.get_optimizer(**self.config['clf_optimizer'], params=clf_head.parameters())
         clf_scheduler, _ = setup_utils.get_scheduler(**self.config['clf_scheduler'], optimizer=clf_optim)
         done_epochs = 0
 
         # If a checkpoint exists, load it
         ckpt_path = os.path.join(self.output_dir, 'simclr/{}/{}_linear_eval.ckpt'.format(data_name, enc_name))
         if os.path.exists(ckpt_path):
-            cprint("\n[INFO] Resuming training from {}_linear_eval.ckpt".format(enc_name), 'yellow')
+            print("\n{}[INFO] Resuming training from {}_linear_eval.ckpt{}".format(pallete['yellow'], enc_name, pallete['end']))
             ckpt = torch.load(ckpt_path)
             done_epochs = ckpt['epoch']
             clf_head.load_state_dict(ckpt['clf_head'])
@@ -257,7 +279,7 @@ class SimCLR:
         """ Save the model, optimizer and scheduler """
 
         data_name = self.config['dataset']['name']
-        enc_name = self.config['simclr_encoder']['name']
+        enc_name = self.config['encoder']['name']
         state = {
             'epoch': epoch,
             'encoder': self.encoder.state_dict(),
@@ -280,12 +302,12 @@ class SCAN:
         self.config = config
         self.output_dir = output_dir
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-        print("\n[INFO] Found device: {}\n".format(torch.cuda.get_device_name(0)))
+        print("\n{}[INFO] Found device: {}\n{}".format(pallete['yellow'], torch.cuda.get_device_name(0), pallete['end']))
 
         # Models
-        self.encoder = models.Encoder(**self.config['scan_encoder']).to(self.device)
+        self.encoder = models.Encoder(**self.config['encoder']).to(self.device)
         setup_utils.print_network(self.encoder, name='Encoder')
-        self.cluster_head = models.ClusteringHead(**self.config['scan_clustering_head']).to(self.device)
+        self.cluster_head = models.ClusteringHead(**self.config['clustering_head']).to(self.device)
         setup_utils.print_network(self.cluster_head, name='Clustering Head')
         
         # Load SimCLR checkpoint into encoder   
@@ -293,18 +315,18 @@ class SCAN:
             best_encoder = torch.load(os.path.join(self.output_dir, 'simclr/{}/{}_best_encoder.ckpt'))
             self.encoder.load_state_dict(best_encoder)
         except:
-            cprint("\n[WARN] Could not load SimCLR encoder! Starting with random initialization!", 'red')
+            print("\n{}[WARN] Could not load SimCLR encoder! Starting with random initialization!{}".format(pallete['red'], pallete['end']))
 
         # Optimizer, scheduler and loss function
         self.optim = setup_utils.get_optimizer(
-            config = self.config['scan_optimizer'], 
+            config = self.config['optimizer'], 
             params = list(self.encoder.parameters())+list(self.cluster_head.parameters())
         )
         self.lr_scheduler, self.warmup_epochs = setup_utils.get_scheduler(
-            config = self.config['scan_scheduler'],
+            config = self.config['scheduler'],
             optimizer = self.optim
         )
-        self.criterion = losses.ScanLoss(**self.config['scan_criterion'])
+        self.criterion = losses.ScanLoss(**self.config['criterion'])
 
     
     def train_one_step(self, data):
@@ -410,7 +432,7 @@ class SCAN:
 
     def save(self, epoch):
         data_name = self.config['dataset']['name']
-        enc_name = self.config['scan_encoder']['name']
+        enc_name = self.config['encoder']['name']
         state = {
             'epoch': epoch,
             'encoder': self.encoder.state_dict(),
@@ -433,17 +455,17 @@ class Selflabel:
         self.config = config
         self.output_dir = output_dir
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-        cprint("\n[INFO] Device found: {}".format(torch.cuda.get_device_name(0)), 'yellow')
+        print("\n{}[INFO] Device found: {}{}".format(pallete['yellow'], torch.cuda.get_device_name(0), pallete['end']))
 
         # Models 
-        self.encoder = models.Encoder(**config['selflabel_encoder'])
+        self.encoder = models.Encoder(**config['encoder'])
         setup_utils.print_network(self.encoder, 'Encoder')
-        self.cluster_head = models.ClusteringHead(**config['selflabel_cluster_head'])
+        self.cluster_head = models.ClusteringHead(**config['cluster_head'])
         setup_utils.print_network(self.cluster_head, 'Clustering Head')
 
         # Load best model
         try:
-            data_name, enc_name = self.config['dataset']['name'], self.config['selflabel_encoder']['name']
+            data_name, enc_name = self.config['dataset']['name'], self.config['encoder']['name']
             best_encoder = torch.load(os.path.join(self.output_dir, 'scan/{}/{}_best_encoder.ckpt'.format(
                 data_name, enc_name
             )))
@@ -453,14 +475,92 @@ class Selflabel:
             self.encoder.load_state_dict(best_encoder)
             self.cluster_head.load_state_dict(best_cluster_head)
         except:
-            cprint("\n[WARN] Could not load clustering checkpoint! Starting from random initialization!", 'red')
+            print("\n{}[WARN] Could not load clustering checkpoint! Starting from random initialization!{}".format(
+                pallete['red'], pallete['end']
+            ))
 
         # Optimizer, scheduler and loss function
         self.optim = setup_utils.get_optimizer(
-            config = self.config['selflabel_optim'],
+            config = self.config['optimizer'],
             params = list(self.encoder.parameters()) + list(self.cluster_head.parameters())
         )
         self.lr_scheduler = setup_utils.get_scheduler(
-            config = self.config['selflabel_scheduler'],
+            config = self.config['scheduler'],
             optimizer = self.optim
         )
+        self.criterion = losses.SelflabelLoss(**self.config['criterion'])
+
+
+    def train_one_step(self, data):
+        """ Trains model on one batch of data """
+
+        anchor, anchor_aug = data['anchor'].to(self.device), data['anchor_aug'].to(self.device)
+
+        # NO grad on anchor
+        with torch.no_grad():
+            anchor_logits = self.cluster_head(self.encoder(anchor))[0]
+        aug_logits = self.cluster_head(self.encoder(anchor_aug))[0]
+
+        loss = self.criterion(anchor_logits, aug_logits)
+        self.optim.zero_grad()
+        loss.backward()
+        self.optim.step()
+        return {'loss': loss.item()}
+
+
+    def validate(self, epoch, val_loader):
+        """ Assesses predicition quality """
+
+        pred_labels, target_labels = [], []
+        pbar = tqdm(total=len(val_loader), desc='Val epoch {}'.format(epoch))
+
+        for idx, data in enumerate(val_loader):
+            img = data['img'].to(self.device)
+            with torch.no_grad():
+                out = self.cluster_head(self.encoder(img))[0]
+            
+            pred_labels.extend(img.argmax(dim=1).cpu().detach().numpy())
+            target_labels.extend(data['target'].numpy())
+            pbar.update(1)
+        pbar.close()
+
+        pred_labels, target_labels = np.array(pred_labels), np.array(target_labels)
+        match = hungarian_match(pred_labels, target_labels, len(np.unique(pred_labels)), len(np.unique(target_labels)))
+        print("\nHungarian match: {}".format(match))
+
+        remapped_preds = np.zeros(len(pred_labels))
+        for pred_i, target_i in match:
+            remapped_preds[pred_labels == int(pred_i)] = int(target_i)
+
+        cls_acc = {}
+        for i in np.unique(remapped_preds):
+            indx = remapped_preds == i
+            cls_acc[int(i)] = (remapped_preds[indx] == target_labels[indx]).sum()/len(remapped_preds[indx])
+        
+        # Print relevant stuff 
+        print("\nValidation epoch {}".format(epoch))
+        for k, v in loss_dict.items():
+            print("\t{}: {:.4f}".format(k, v))
+        
+        print("\nHungarian accuracy")
+        for k, v in cls_acc.items():
+            print("\tClass {} - {:.4f}".format(k, v))
+
+        return {"acc": np.mean(list(cls_acc.values()))}
+
+
+    def save(self, epoch):
+        data_name = self.config['dataset']['name']
+        enc_name = self.config['encoder']['name']
+        state = {
+            'epoch': epoch,
+            'encoder': self.encoder.state_dict(),
+            'cluster_head': self.cluster_head.state_dict(),
+            'optim': self.optim.state_dict(),
+            'scheduler': self.lr_scheduler.state_dict() if self.lr_scheduler is not None else None
+        }
+        torch.save(state, os.path.join(self.output_dir, 'selflabel/{}/{}_epoch_{}'.format(
+            data_name, enc_name, epoch
+        )))
+
+
