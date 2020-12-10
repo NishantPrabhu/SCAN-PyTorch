@@ -11,7 +11,7 @@ import random
 import numpy as np
 from PIL import Image
 from torchvision import datasets 
-
+from torch.utils.data import DataLoader, WeightedRandomSampler
 
 DATASET_HELPER = {
     'cifar10': {'data': datasets.CIFAR10, 'classes': 10},
@@ -35,15 +35,16 @@ def get_dataset(config, split, transforms, return_items):
     Generates a dataset object with required images and/or labels 
     transformed as specified.
     """
-    name = config['dataset'].pop('name')
+    name = config['dataset'].pop('name', None)
     if name not in list(DATASET_HELPER.keys()):
         raise ValueError('Invalid dataset; should be one of (cifar10, cifar100, stl10)')
     base_class = DATASET_HELPER[name]['data']
+    root = config['dataset'].pop('root', './')
 
     # Image dataset class
     class ImageDataset(base_class):
 
-        def __init__(self, root, train=True, download=True, transforms=None, return_items=None):
+        def __init__(self, root, transforms, return_items, train, download=True):
             super().__init__(root=root, train=train, download=download)
             self.transforms = transforms 
             self.return_items = return_items
@@ -61,7 +62,7 @@ def get_dataset(config, split, transforms, return_items):
             return {key: data[key] for key in self.return_items}
 
     # Return dataset object
-    return  ImageDataset(root=config['dataset']['root'], train=split=='train', transforms=transforms, return_items=return_items)
+    return ImageDataset(root=root, train=split=='train', transforms=transforms, return_items=return_items)
 
 
 class NeighborDataset:
@@ -70,16 +71,25 @@ class NeighborDataset:
         self.img_dataset = img_dataset
         if 'img' not in list(self.img_dataset.transforms.keys()):
             raise ValueError('img key not found in transforms')
-        self.img_dataset.return_items = ['img', 'target']
-        self.neighbor_indices = neighbor_indices
+        self.img_dataset.return_items = ['img', 'target'] # sanity check
+        self.nbr_indices = neighbor_indices
 
     def __getitem__(self, i):
         # Get anchor and choose one of the possible neighbors
         anchor = self.img_dataset[i]
-        possible_neighbors = self.neighbor_indices[i]
-        neighbor_idx = random.choices(possible_neighbors, k=1)[0]
-        neighbor = self.img_dataset[neighbor_idx]
-        return {'anchor_img': anchor['img'], 'neighbor_img': neighbor['img'], 'target': anchor['target']}
+        pos_nbrs = self.nbr_indices[i]
+        nbr_idx = random.choices(pos_nbrs, k=1)[0]
+        nbr = self.img_dataset[nbr_idx]
+        return {'anchor': anchor['img'], 'neighbour': nbr['img'], 'target': anchor['target']}
 
     def __len__(self):
         return len(self.img_dataset)
+
+def get_dataloader(config, dataset, weigh=False, shuffle=False):
+    if weigh:
+        weights = sample_weights(dataset.targets)
+        sampler = WeightedRandomSampler(weights)
+        return DataLoader(dataset, batch_size=config['batch_size'], num_workers=config['num_workers'], sampler=sampler)
+    else:
+        return DataLoader(dataset, batch_size=config['batch_size'], num_workers=config['num_workers'], shuffle=shuffle)
+

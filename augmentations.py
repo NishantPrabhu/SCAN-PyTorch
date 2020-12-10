@@ -26,7 +26,7 @@ class GaussianBlur:
 
 class Cutout:
 
-    def __init__(self, n_cuts, max_len):
+    def __init__(self, n_cuts=0, max_len=1):
         self.n_cuts = n_cuts
         self.max_len = max_len 
 
@@ -152,5 +152,4 @@ def get_transform(config):
             tr = TRANSFORM_HELPER[key]()
         transform.append(tr)
     return transforms.Compose(transform)
-
 

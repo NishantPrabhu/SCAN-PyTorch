@@ -71,7 +71,7 @@ class ProjectionHead(nn.Module):
 
     def forward(self, x):
         out = self.BN2(self.W2(self.ReLU(self.BN1(self.W1(x)))))
-        out = F.normalize(out, p=2, dim=-1)
+        out = F.normalize(out, p=2, dim=1)
         return out
 
 
@@ -82,7 +82,7 @@ class ClassificationHead(nn.Module):
         self.W1 = nn.Linear(in_dim, n_classes)
 
     def forward(self, x):
-        return F.log_softmax(self.W1(x), dim=-1)
+        return self.W1(x)
 
 
 class ClusteringHead(nn.Module):
@@ -93,3 +93,4 @@ class ClusteringHead(nn.Module):
 
     def forward(self, x):
         return [w(x) for w in self.W]
+
