@@ -4,11 +4,11 @@
 
 # General
 task: simclr
-epochs: 1
+epochs: 1000
 batch_size: 512
 num_workers: 8
-eval_every: 1
-save_every: 1
+eval_every: 100
+save_every: 100
 
 # Model
 encoder:
@@ -35,7 +35,7 @@ criterion:
 
 
 # Linear classifier
-linear_eval_epochs: 1
+linear_eval_epochs: 100
 
 clf_optimizer:
   name: adam

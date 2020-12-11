@@ -321,6 +321,9 @@ class SCAN:
         setup_utils.print_network(self.encoder, name='Encoder')
         self.head = models.ClusteringHead(**self.config['head']).to(self.device)
         setup_utils.print_network(self.head, name='Clustering Head')
+
+        # Loss meters to keep track of loss for each head
+        self.loss_meters = [data_utils.Scalar() for _ in range(self.config['head']['heads'])]
         
         # Load SimCLR checkpoint into encoder   
         try:
@@ -391,11 +394,13 @@ class SCAN:
 
             # Compute all losses and collect
             total_loss, consistency_loss, entropy_loss = [], [], []
-            for anchor, neighbor in zip(anchor_out, neighbor_out):
+            for i, (anchor, neighbor) in enumerate(zip(anchor_out, neighbor_out)):
                 tl, cl, el = self.criterion(anchor, neighbor)
+                self.loss_meters[i].update(tl)
                 total_loss.append(tl)
                 consistency_loss.append(cl)
                 entropy_loss.append(el)
+
 
             # Collect loss for each head
             for i in range(len(total_loss)):
@@ -444,6 +449,8 @@ class SCAN:
 
 
     def save(self, epoch):
+        """ Save the model """
+
         data_name = self.config['dataset']['name']
         enc_name = self.config['encoder']['name']
         state = {
@@ -456,6 +463,12 @@ class SCAN:
         torch.save(state, os.path.join(self.output_dir, 'scan/{}/{}_epoch_{}'.format(
             data_name, enc_name, epoch
         )))
+
+
+    def find_best_head(self):
+        """ Returns the head with lowest average total loss """
+
+        return np.argmin([m.mean for m in self.loss_meters])
 
 
 # =============================================================================================
@@ -571,7 +584,7 @@ class Selflabel:
             'encoder': self.encoder.state_dict(),
             'head': self.head.state_dict(),
             'optim': self.optim.state_dict(),
-            'scheduler': self.lr_scheduler.state_dict() if self.lr_scheduler is not None else None
+            'scheduler': self.lr_scheduler.statie_dict() if self.lr_scheduler is not None else None
         }
         torch.save(state, os.path.join(self.output_dir, 'selflabel/{}/{}_epoch_{}'.format(
             data_name, enc_name, epoch
@@ -621,21 +634,21 @@ class Trainer:
 
         # Restart from last checkpoint if there exists one
         done_epochs = 0
-        try:
-            files = os.listdir(os.path.join(self.output_dir, '{}/{}/'.format(self.task, self.data_name)))
-            if len(files) > 0:
-                latest = np.argmax([int(f.split('_')[-1]) for f in files])
-                ckpt_path = os.path.join(self.output_dir, '{}/{}/{}'.format(self.task, self.data_name, files[latest]))
-                ckpt = torch.load(ckpt_path)
+        files = os.listdir(os.path.join(self.output_dir, '{}/{}/'.format(self.task, self.data_name)))
+        
+        if len(files) > 0:
+            latest = np.argmax([int(f.split('_')[-1]) for f in files])
+            ckpt_path = os.path.join(self.output_dir, '{}/{}/{}'.format(self.task, self.data_name, files[latest]))
+            ckpt = torch.load(ckpt_path)
 
-                done_epochs = ckpt['epoch']
-                self.model.encoder.load_state_dict(ckpt['encoder'])
-                self.model.head.load_state_dict(ckpt['head'])
-                self.model.optim.load_state_dict(ckpt['optim'])
-                if self.model.lr_scheduler is not None:
-                    self.model.lr_scheduler.load_state_dict(ckpt['scheduler'])
-        except:
-            print("\n[INFO] No checkpoint found, starting afresh")
+            done_epochs = ckpt['epoch']
+            self.model.encoder.load_state_dict(ckpt['encoder'])
+            self.model.head.load_state_dict(ckpt['head'])
+            self.model.optim.load_state_dict(ckpt['optim'])
+            if self.model.lr_scheduler is not None:
+                self.model.lr_scheduler.load_state_dict(ckpt['scheduler'])
+        else:
+            print("\n{}[INFO] No checkpoint found, starting afresh{}".format(pallete['yellow'], pallete['end']))
 
         # Train
         for epoch in range(self.config['epochs'] - done_epochs):
@@ -689,3 +702,17 @@ class Trainer:
 
             if (epoch+1) % self.config['save_every'] == 0:
                 self.model.save(epoch)
+
+        # For SCAN, overwrite best_head.ckpt with weights of only the best head
+        # Only useful for models with n_heads > 1, but works even if it's not the case
+        
+        if self.task == 'scan':
+            
+            best_head = self.model.find_best_head()
+            best_head_state = self.model.head.W[best_head].state_dict()
+            new_keys = ['W.0.weight', 'W.0.bias']
+
+            # Just need to modify the keys of the state_dict
+            bhs_mod = {new_k: v for new_k, (k, v) in zip(new_keys, best_head_state.items())}
+            torch.save(bhs_mod, os.path.join(self.output_dir, '{}/{}/{}_best_head.ckpt'.format(self.task, self.data_name, self.model_name)))
+

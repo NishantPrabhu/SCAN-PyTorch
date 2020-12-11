@@ -97,7 +97,7 @@ if __name__ == "__main__":
 
         # Train
         trainer.train(scan_train_loader, scan_val_loader)
-
+        
 
     elif trainer.task == 'selflabel':
 
