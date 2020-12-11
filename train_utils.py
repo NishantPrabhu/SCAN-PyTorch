@@ -445,6 +445,11 @@ class SCAN:
         for k, v in cls_acc.items():
             print("\tClass {} - {:.4f}".format(k, v))
 
+        # Log class accuracy in wandb as histogram
+        data = [[k, v] for k, v in cls_acc.items()]
+        table = wandb.Table(data=data, columns=['cluster', 'accuracy'])
+        wandb.log({'cluster_accuracy_chart': wandb.plot.bar(table, 'cluster', 'accuracy', title='Cluster-wise accuracy')})
+
         return {**loss_dict, "acc": np.mean(list(cls_acc.values()))}
 
 
@@ -572,6 +577,11 @@ class Selflabel:
         print("\nHungarian accuracy")
         for k, v in cls_acc.items():
             print("\tClass {} - {:.4f}".format(k, v))
+
+        # Log class accuracy in wandb as histogram
+        data = [[k, v] for k, v in cls_acc.items()]
+        table = wandb.Table(data=data, columns=['cluster', 'accuracy'])
+        wandb.log({'cluster_accuracy_chart': wandb.plot.bar(table, 'cluster', 'accuracy', title='Cluster-wise accuracy')})
 
         return {"acc": np.mean(list(cls_acc.values()))}
 
