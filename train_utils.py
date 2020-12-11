@@ -17,8 +17,9 @@ import models
 import losses
 from tqdm import tqdm 
 import numpy as np 
-import wandb
 import faiss
+import wandb
+import logging
 
 
 # For color printing
@@ -91,30 +92,31 @@ class SimCLR:
         print("\n{}[INFO] Device found: {}{}".format(pallete['yellow'], torch.cuda.get_device_name(0), pallete['end']))
 
         # Models 
-        self.encoder = models.Encoder(**config['encoder']).to(self.device)
+        self.encoder = models.Encoder(**self.config['encoder']).to(self.device)
         setup_utils.print_network(self.encoder, 'Encoder')
-        self.proj_head = models.ProjectionHead(**config['projection_head']).to(self.device)
-        setup_utils.print_network(self.proj_head, 'Projection Head')
-        self.proj_head.apply(init_weights)
+        self.head = models.ProjectionHead(**self.config['head']).to(self.device)
+        setup_utils.print_network(self.head, 'Projection Head')
+        self.head.apply(init_weights)
 
         # Optimizer, scheduler and criterion
         self.optim = setup_utils.get_optimizer(
-            config=config['optimizer'], 
-            params=list(self.encoder.parameters)+list(self.proj_head.parameters())
+            config = self.config['optimizer'], 
+            params = list(self.encoder.parameters)+list(self.head.parameters())
         )
         self.lr_scheduler, self.warmup_epochs = setup_utils.get_scheduler(
-            config={**config['scheduler'], 'epochs': config['epochs']},
-            optimizer=self.optim
+            config = {**self.config['scheduler'], 'epochs': self.config['epochs']},
+            optimizer = self.optim
         )
-        self.criterion = losses.SimclrLoss(config['batch_size'], **config['simclr_criterion'])
+        self.criterion = losses.SimclrLoss(self.config['batch_size'], **self.config['simclr_criterion'])
+        self.lr = self.config['optimizer']['lr']
 
 
     def train_one_step(self, data):
         """ Trains model on one batch of data """
 
         img_i, img_j = data['i'].to(self.device), data['j'].to(self.device)
-        zi = self.proj_head(self.encoder(img_i))
-        zj = self.proj_head(self.encoder(img_j))
+        zi = self.head(self.encoder(img_i))
+        zj = self.head(self.encoder(img_j))
 
         self.optim.zero_grad()
         loss = self.criterion(zi, zj)
@@ -149,7 +151,7 @@ class SimCLR:
         for data in val_loader:
             img, target = data['img'].to(self.device), data['target']
             with torch.no_grad():
-                z = self.proj_head(self.encoder(img))
+                z = self.head(self.encoder(img))
             z = F.normalize(z, p=2, dim=-1)
             fvecs.append(z.detach().cpu().numpy())
             labels.append(target.numpy())
@@ -160,7 +162,7 @@ class SimCLR:
 
         pbar.set_description('[Val epoch] {} - [Accuracy] {:.4f}'.format(epoch, acc))
         pbar.close()
-        return {'val_acc': acc}
+        return {'acc': acc}
 
 
     def linear_eval(self, train_loader, val_loader):
@@ -254,8 +256,10 @@ class SimCLR:
             ))
             pbar.close()
 
+        return {'acc': val_acc}
+
         
-    def find_neighbors(self, data_loader, img_key, topk=20):
+    def find_neighbors(self, data_loader, img_key, fname, topk=20):
         """ Mine neighbors with trained encoder and projection head """
 
         # Generate vectors
@@ -264,7 +268,7 @@ class SimCLR:
         for batch in data_loader:
             img = batch[img_key].to(self.device)
             with torch.no_grad():
-                z = self.proj_head(self.encoder(img))
+                z = self.head(self.encoder(img))
             fvecs.extend(z.cpu().detach().numpy())
             pbar.update(1)
         pbar.close()
@@ -275,7 +279,9 @@ class SimCLR:
         index = faiss.index_cpu_to_all_gpus(index)
         index.add(fvecs)
         _, indices = index.search(fvecs, topk+1)
-        np.save(os.path.join(self.output_dir, 'simclr/{}/{}_neighbors.npy'), indices)
+        np.save(os.path.join(self.output_dir, 'simclr/{}/{}_{}.npy'.format(
+            self.config['dataset']['name'], self.config['encoder']['name'], fname
+        )), indices)
 
 
     def save(self, epoch):
@@ -286,7 +292,7 @@ class SimCLR:
         state = {
             'epoch': epoch,
             'encoder': self.encoder.state_dict(),
-            'proj_head': self.proj_head.state_dict(),
+            'head': self.head.state_dict(),
             'optim': self.optim.state_dict(),
             'scheduler': self.lr_scheduler.state_dict() if self.lr_scheduler is not None else None
         }
@@ -310,8 +316,8 @@ class SCAN:
         # Models
         self.encoder = models.Encoder(**self.config['encoder']).to(self.device)
         setup_utils.print_network(self.encoder, name='Encoder')
-        self.cluster_head = models.ClusteringHead(**self.config['clustering_head']).to(self.device)
-        setup_utils.print_network(self.cluster_head, name='Clustering Head')
+        self.head = models.ClusteringHead(**self.config['head']).to(self.device)
+        setup_utils.print_network(self.head, name='Clustering Head')
         
         # Load SimCLR checkpoint into encoder   
         try:
@@ -323,21 +329,22 @@ class SCAN:
         # Optimizer, scheduler and loss function
         self.optim = setup_utils.get_optimizer(
             config = self.config['optimizer'], 
-            params = list(self.encoder.parameters())+list(self.cluster_head.parameters())
+            params = list(self.encoder.parameters())+list(self.head.parameters())
         )
         self.lr_scheduler, self.warmup_epochs = setup_utils.get_scheduler(
             config = self.config['scheduler'],
             optimizer = self.optim
         )
         self.criterion = losses.ScanLoss(**self.config['criterion'])
+        self.lr = self.config['optimizer']['lr']
 
     
     def train_one_step(self, data):
         """ Trains model on one batch of data """
 
         anchor_img, neighbor_img = data['anchor_img'].to(self.device), data['neighbor_img'].to(self.device)
-        anchor_out = self.cluster_head(self.encoder(anchor_img))
-        neighbor_out = self.cluster_head(self.encoder(neighbor_img))
+        anchor_out = self.head(self.encoder(anchor_img))
+        neighbor_out = self.head(self.encoder(neighbor_img))
 
         total_losses, consis_losses, entr_losses = [], [], []
         for anchor, neighbor in zip(anchor_out, neighbor_out):
@@ -373,8 +380,8 @@ class SCAN:
             
             # Freeze model and generate predictions
             with torch.no_grad():
-                anchor_out = self.cluster_head(self.encoder(anchor_img))
-                neighbor_out = self.cluster_head(self.encoder(neighbor_img))
+                anchor_out = self.head(self.encoder(anchor_img))
+                neighbor_out = self.head(self.encoder(neighbor_img))
 
             pred_labels.extend(np.concatenate([o.argmax(dim=1).unsqueeze(1).detach().cpu().numpy() for o in anchor_out], axis=1))
             target_labels.extend(data['target'].numpy())
@@ -439,7 +446,7 @@ class SCAN:
         state = {
             'epoch': epoch,
             'encoder': self.encoder.state_dict(),
-            'cluster_head': self.cluster_head.state_dict(),
+            'head': self.head.state_dict(),
             'optim': self.optim.state_dict(),
             'scheduler': self.lr_scheduler.state_dict() if self.lr_scheduler is not None else None
         }
@@ -463,8 +470,8 @@ class Selflabel:
         # Models 
         self.encoder = models.Encoder(**config['encoder'])
         setup_utils.print_network(self.encoder, 'Encoder')
-        self.cluster_head = models.ClusteringHead(**config['cluster_head'])
-        setup_utils.print_network(self.cluster_head, 'Clustering Head')
+        self.head = models.ClusteringHead(**config['head'])
+        setup_utils.print_network(self.head, 'Clustering Head')
 
         # Load best model
         try:
@@ -472,11 +479,11 @@ class Selflabel:
             best_encoder = torch.load(os.path.join(self.output_dir, 'scan/{}/{}_best_encoder.ckpt'.format(
                 data_name, enc_name
             )))
-            best_cluster_head = torch.load(os.path.join(self.output_dir, 'scan/{}/{}_best_cluster_head.ckpt'.format(
+            best_head = torch.load(os.path.join(self.output_dir, 'scan/{}/{}_best_head.ckpt'.format(
                 data_name, enc_name
             )))
             self.encoder.load_state_dict(best_encoder)
-            self.cluster_head.load_state_dict(best_cluster_head)
+            self.head.load_state_dict(best_head)
         except:
             print("\n{}[WARN] Could not load clustering checkpoint! Starting from random initialization!{}".format(
                 pallete['red'], pallete['end']
@@ -485,13 +492,14 @@ class Selflabel:
         # Optimizer, scheduler and loss function
         self.optim = setup_utils.get_optimizer(
             config = self.config['optimizer'],
-            params = list(self.encoder.parameters()) + list(self.cluster_head.parameters())
+            params = list(self.encoder.parameters()) + list(self.head.parameters())
         )
         self.lr_scheduler = setup_utils.get_scheduler(
             config = self.config['scheduler'],
             optimizer = self.optim
         )
         self.criterion = losses.SelflabelLoss(**self.config['criterion'])
+        self.lr = self.config['optimizer']['lr']
 
 
     def train_one_step(self, data):
@@ -501,8 +509,8 @@ class Selflabel:
 
         # NO grad on anchor
         with torch.no_grad():
-            anchor_logits = self.cluster_head(self.encoder(anchor))[0]
-        aug_logits = self.cluster_head(self.encoder(anchor_aug))[0]
+            anchor_logits = self.head(self.encoder(anchor))[0]
+        aug_logits = self.head(self.encoder(anchor_aug))[0]
 
         loss = self.criterion(anchor_logits, aug_logits)
         self.optim.zero_grad()
@@ -520,7 +528,7 @@ class Selflabel:
         for idx, data in enumerate(val_loader):
             img = data['img'].to(self.device)
             with torch.no_grad():
-                out = self.cluster_head(self.encoder(img))[0]
+                out = self.head(self.encoder(img))[0]
             
             pred_labels.extend(img.argmax(dim=1).cpu().detach().numpy())
             target_labels.extend(data['target'].numpy())
@@ -558,7 +566,7 @@ class Selflabel:
         state = {
             'epoch': epoch,
             'encoder': self.encoder.state_dict(),
-            'cluster_head': self.cluster_head.state_dict(),
+            'head': self.head.state_dict(),
             'optim': self.optim.state_dict(),
             'scheduler': self.lr_scheduler.state_dict() if self.lr_scheduler is not None else None
         }
@@ -567,3 +575,104 @@ class Selflabel:
         )))
 
 
+# ===================================================================================================
+# Trainer: Wrapper class to operate the classes above
+# ===================================================================================================
+
+class Trainer:
+
+    def __init__(self, config_name, config, output_dir):
+        # Config file should preferably have format -> (task)_(dataset)_(backbone_name).yaml
+        # For example: simclr_cifar10_resnet18.yaml
+        # Valid tasks: simclr, scan, selflabel
+        # Valid backbone names: resnet18, resnet50, resnet101
+        # Valid datasets: cifar10, cifar100, stl10 
+
+        self.task, self.data_name, self.model_name = config_name.split('_')
+        self.config, self.output_dir = config, output_dir
+
+        if 'simclr' in config_name:
+            self.model = train_utils.SimCLR(self.config, self.output_dir)
+        
+        elif 'scan' in self.config_name:
+            self.model = train_utils.SCAN(self.config, self.output_dir)
+
+        elif 'selflabel' in self.config_name:
+            self.model = train_utils.Selflabel(self.config, self.output_dir)
+
+        # Initialize wandb
+        wandb.init(self.task)
+        
+
+    def train(self, train_loader, val_loader):
+        """ Trains the model for specified number of epochs """
+
+        # Restart from last checkpoint if there exists one
+        try:
+            files = os.listdir(os.path.join(self.output_dir, '{}/{}/'.format(self.task, self.data_name)))
+            if len(files) > 0:
+                latest = np.argmax([int(f.split('_')[-1]) for f in files])
+                ckpt_path = os.path.join(self.output_dir, '{}/{}/{}'.format(self.task, self.data_name, files[latest]))
+                ckpt = torch.load(ckpt_path)
+
+                done_epochs = ckpt['epoch']
+                self.model.encoder.load_state_dict(ckpt['encoder'])
+                self.model.head.load_state_dict(ckpt['head'])
+                self.model.optim.load_state_dict(ckpt['optim'])
+                if self.model.lr_scheduler is not None:
+                    self.model.lr_scheduler.load_state_dict(ckpt['scheduler'])
+        except:
+            done_epochs = 0
+
+        # Train
+        for epoch in range(self.config['epochs'] - done_epochs):
+            
+            pbar = tqdm(total=len(train_loader), desc='Train epoch {}'.format(epoch+1))
+            epoch_metrics = {}
+
+            for idx, data in enumerate(train_loader):
+                step = epoch * len(train_loader) + idx 
+                metrics = self.model.train_one_step(data)
+                for key, value in metrics.items():
+                    if indx == 0:
+                        epoch_metrics[key] = [value] 
+                    else:
+                        epoch_metrics[key].append(value) 
+
+                wandb.log({**metrics, 'train_step': step})                
+                pbar.update(1)
+
+            # Logs
+            log = f"[Train Epoch] {epoch+1} - "
+            for k, v in epoch_metrics.items():
+                log += f"[{key}] {round(np.mean(value), 4)} - "
+            pbar.set_description(log)
+            logging.info(log)
+            wandb.log({'lr': self.model.optim.param_groups[0]['lr'], 'epoch': epoch})
+            pbar.close()
+
+            # Validation
+            best_acc = 0
+            if (epoch+1) % self.config['eval_every']:
+                val_metrics = self.model.validate(epoch+1, val_loader)
+
+                # Save model if better in accuracy
+                if val_metrics['acc'] > best_acc:
+                    
+                    print("\n[INFO] Saving data; accuracy improved from {:.4f} -> {:.4f}".format(best_acc, val_metrics['acc']))
+                    best_acc = val_metrics['acc']:
+                    torch.save(self.model.encoder.state_dict(), os.path.join(self.output_dir, '{}/{}/{}_best_encoder.ckpt'.format(
+                        self.task, self.data_name, self.model_name
+                    )))
+                    torch.save(self.model.head.state_dict(), os.path.join(self.output_dir, '{}/{}/{}_best_head.ckpt'.format(
+                        self.task, self.data_name, self.model_name
+                    )))
+
+            # Update learning rate
+            if (epoch+1) < self.model.warmup_epochs:
+                self.model.optim.param_groups[0]['lr'] = (epoch+1)/model.warmup_epochs * self.model.lr
+            elif self.model.lr_scheduler is not None:
+                self.model.lr_scheduler.step()
+
+            if (epoch+1) % self.config['save_every'] == 0:
+                self.model.save(epoch)

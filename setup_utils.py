@@ -109,8 +109,8 @@ def get_scheduler(config, optimizer):
         for group in optimizer.param_groups:
             group['lr'] = 1e-12/warmup_epochs * group['lr']
 
-    if name:
-        if name == 'cosin':
+    if name is not None:
+        if name == 'cosine':
             scheduler = lr_scheduler.CosineAnnealingLR(optim, config['epochs']-warmup_epochs, eta_min=0.0, last_epoch=-1)
         else:
             raise NotImplementedError('Invalid scheduler {}'.format(name))

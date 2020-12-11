@@ -13,6 +13,7 @@ from PIL import Image
 from torchvision import datasets 
 from torch.utils.data import DataLoader, WeightedRandomSampler
 
+
 DATASET_HELPER = {
     'cifar10': {'data': datasets.CIFAR10, 'classes': 10},
     'cifar100': {'data': datasets.CIFAR100, 'classes': 100},
@@ -87,7 +88,8 @@ class NeighborDataset:
 
 
 def get_dataloader(config, dataset, weigh=False, shuffle=False):
-    
+    """ Returns a DataLoader with specified configuration """
+
     if weigh:
         weights = sample_weights(dataset.targets)
         sampler = WeightedRandomSampler(weights)
