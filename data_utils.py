@@ -26,7 +26,7 @@ def sample_weights(labels):
     Computes sample weights for sampler in dataloaders,
     based on class occurence.
     """
-    cls_count = np.unique(labels, return_counts=True)
+    cls_count = np.unique(labels, return_counts=True)[1]
     cls_weights = 1./torch.Tensor(cls_count)
     return cls_weights[list(map(int, labels))]
 
@@ -36,11 +36,11 @@ def get_dataset(config, split, transforms, return_items):
     Generates a dataset object with required images and/or labels 
     transformed as specified.
     """
-    name = config['dataset'].pop('name', None)
+    name = config['dataset'].get('name', None)
     if name not in list(DATASET_HELPER.keys()):
         raise ValueError('Invalid dataset; should be one of (cifar10, cifar100, stl10)')
     base_class = DATASET_HELPER[name]['data']
-    root = config['dataset'].pop('root', './')
+    root = config['dataset'].get('root', './')
 
     # Image dataset class
     class ImageDataset(base_class):
@@ -92,7 +92,7 @@ def get_dataloader(config, dataset, weigh=False, shuffle=False):
 
     if weigh:
         weights = sample_weights(dataset.targets)
-        sampler = WeightedRandomSampler(weights)
+        sampler = WeightedRandomSampler(weights, len(weights), replacement=True)
         return DataLoader(dataset, batch_size=config['batch_size'], num_workers=config['num_workers'], sampler=sampler)
     else:
         return DataLoader(dataset, batch_size=config['batch_size'], num_workers=config['num_workers'], shuffle=shuffle)

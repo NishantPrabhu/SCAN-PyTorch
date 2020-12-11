@@ -28,44 +28,58 @@ if __name__ == "__main__":
     # Initialize experiment
     config, output_dir = setup_utils.init_experiment(args, seed=420)
 
-    # Function to build required structure in output directory
-    
-
     # Generate transforms
-    transforms = {
-        'train_transform': augmentations.get_transform(config['train_transform'])
-        'val_transform': augmentations.get_transform(config['val_transform'])
+    data_transforms = {
+        'train_transform': augmentations.get_transform(config['train_transform']),
+        'val_transform': augmentations.get_transform(config['val_transform']),
         'aug_transform': augmentations.get_transform(config['aug_transform'])
     }
 
     # Generate datasets
-    train_dset = data_utils.get_dataset(config, 'train', transforms={**config['data_transforms']['train']}, return_items=config['train_items'])
-    val_dset = data_utils.get_dataset(config, 'val', transforms={**config['data_transforms']['val']}, return_items=config['val_items'])
-    main_dset = data_utils.get_dataset(config, 'train', transforms={**config['data_transforms']['main']}, return_items=config['main_items'])
+    train_dset = data_utils.get_dataset(
+        config = config, 
+        split = 'train', 
+        transforms = {k: data_transforms[v] for k, v in config['data_transforms']['train'].items()}, 
+        return_items = config['train_items']
+    )
+    val_dset = data_utils.get_dataset(
+        config = config, 
+        split = 'val', 
+        transforms = {k: data_transforms[v] for k, v in config['data_transforms']['val'].items()}, 
+        return_items = config['val_items']
+    )
+    main_dset = data_utils.get_dataset(
+        config = config, 
+        split = 'train', 
+        transforms = {k: data_transforms[v] for k, v in config['data_transforms']['main'].items()}, 
+        return_items = config['main_items']
+    )
 
     main_loader = data_utils.get_dataloader(config, main_dset, weigh=True, shuffle=True)
     val_loader = data_utils.get_dataloader(config, val_dset, weigh=False, shuffle=False)
     train_loader = data_utils.get_dataloader(config, train_dset, weigh=False, shuffle=False)
 
 
-    # Begin experiment
-    trainer = train_utils.Trainer(args)
-    
+    # Begin training
+    trainer = train_utils.Trainer(config, output_dir)
+    print("\n[INFO] Beginning training ...")
+
     if trainer.task == 'simclr':
     
         # Train
         trainer.train(main_loader, val_loader)
         
-        # Linear evaluation
+        # Linear 
+        print('\n[INFO] Linear evaluation ...')
         val_acc = trainer.model.linear_eval(train_loader, val_loader)
-        print("\n[INFO] Linear eval accuracy: {:.4f}".format(val_acc['acc']))
 
         # Neighbor mining
+        print("\n[INFO] Mining neighbors ...")
         trainer.model.find_neighbors(train_loader, 'img', 'train_neighbors', topk=20)
         trainer.model.find_neighbors(val_loader, 'img', 'val_neighbors', topk=20)
 
 
-    if trainer.task == 'scan':
+    elif trainer.task == 'scan':
 
         # Load neighbors
         train_neighbors = np.load(os.path.join(output_dir, 'simclr/{}/{}_train_neighbors.npy'.format(
@@ -85,14 +99,12 @@ if __name__ == "__main__":
         trainer.train(scan_train_loader, scan_val_loader)
 
 
-    if trainer.task == 'selflabel':
+    elif trainer.task == 'selflabel':
 
         # Train
         trainer.train(main_loader, val_loader)
 
-
     else:
-
         raise NotImplementedError("No task was found in the configuration file")
 
 

@@ -42,7 +42,7 @@ def init_experiment(args, seed=420):
     torch.backends.cudnn.benchmark = False 
 
     # Setup logging directory
-    output_dir = args.output_dir
+    output_dir = args['output']
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
 
@@ -56,7 +56,7 @@ def init_experiment(args, seed=420):
     print('\n[INFO] Logging at {}'.format(output_dir))
 
     # Open config file and write
-    config = open_config(args.config)
+    config = open_config(args['config'])
     with open(os.path.join(output_dir, 'hyperparameters.txt'), 'w') as logs:
         logs.write(yaml.dump(config))
 
@@ -111,7 +111,7 @@ def get_scheduler(config, optimizer):
 
     if name is not None:
         if name == 'cosine':
-            scheduler = lr_scheduler.CosineAnnealingLR(optim, config['epochs']-warmup_epochs, eta_min=0.0, last_epoch=-1)
+            scheduler = lr_scheduler.CosineAnnealingLR(optimizer, config['epochs']-warmup_epochs, eta_min=0.0, last_epoch=-1)
         else:
             raise NotImplementedError('Invalid scheduler {}'.format(name))
         return scheduler, warmup_epochs

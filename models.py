@@ -67,7 +67,7 @@ class ProjectionHead(nn.Module):
         self.BN1 = nn.BatchNorm1d(in_dim)
         self.ReLU = nn.ReLU()
         self.W2 = nn.Linear(in_dim, out_dim)
-        self.BN2 = nn.BatchNorm2d(out_dim)
+        self.BN2 = nn.BatchNorm1d(out_dim)
 
     def forward(self, x):
         out = self.BN2(self.W2(self.ReLU(self.BN1(self.W1(x)))))

@@ -20,6 +20,7 @@ import numpy as np
 import faiss
 import wandb
 import logging
+import os
 
 
 # For color printing
@@ -41,7 +42,7 @@ pallete = {
     "lightmagenta" : "\x1b[95m",
     "lightcyan" : "\x1b[96m",
     "white" : "\x1b[97m",
-    "END" : "\033[0m"
+    "end" : "\033[0m"
 }
 
 
@@ -101,13 +102,13 @@ class SimCLR:
         # Optimizer, scheduler and criterion
         self.optim = setup_utils.get_optimizer(
             config = self.config['optimizer'], 
-            params = list(self.encoder.parameters)+list(self.head.parameters())
+            params = list(self.encoder.parameters())+list(self.head.parameters())
         )
         self.lr_scheduler, self.warmup_epochs = setup_utils.get_scheduler(
             config = {**self.config['scheduler'], 'epochs': self.config['epochs']},
             optimizer = self.optim
         )
-        self.criterion = losses.SimclrLoss(self.config['batch_size'], **self.config['simclr_criterion'])
+        self.criterion = losses.SimclrLoss(**self.config['criterion'])
         self.lr = self.config['optimizer']['lr']
 
 
@@ -145,7 +146,7 @@ class SimCLR:
     def validate(self, epoch, val_loader):
         """ Neighbor mining accuracies wrapper function """
 
-        pbar = tqdm(total=len(val_loader), desc='Val epoch {}'.format(epoch))
+        pbar = tqdm(total=len(val_loader), desc='Val epoch {:4d}'.format(epoch))
         fvecs, labels = [], []
 
         for data in val_loader:
@@ -160,7 +161,7 @@ class SimCLR:
         fvecs, labels = np.array(fvecs), np.array(labels)
         acc = SimCLR.calculate_accuracy(fvecs, labels, topk=20)
 
-        pbar.set_description('[Val epoch] {} - [Accuracy] {:.4f}'.format(epoch, acc))
+        pbar.set_description('[Val epoch] {:4d} - [Accuracy] {:.4f}'.format(epoch, acc))
         pbar.close()
         return {'acc': acc}
 
@@ -171,9 +172,9 @@ class SimCLR:
         data_name = self.config['dataset']['name']
         enc_name = self.config['encoder']['name']
 
-        clf_head = models.ClassificationHead(in_dim=self.encoder.backbone_dim, n_classes=self.config['dataset']['n_classes'])
-        clf_optim = setup_utils.get_optimizer(**self.config['clf_optimizer'], params=clf_head.parameters())
-        clf_scheduler, _ = setup_utils.get_scheduler(**self.config['clf_scheduler'], optimizer=clf_optim)
+        clf_head = models.ClassificationHead(in_dim=self.encoder.backbone_dim, n_classes=self.config['dataset']['n_classes']).to(self.device)
+        clf_optim = setup_utils.get_optimizer(config={**self.config['clf_optimizer']}, params=clf_head.parameters())
+        clf_scheduler, _ = setup_utils.get_scheduler(config={**self.config['clf_scheduler'], 'epochs': self.config['epochs']}, optimizer=clf_optim)
         criterion = losses.SupervisedLoss()
         done_epochs = 0
 
@@ -190,11 +191,11 @@ class SimCLR:
         # Train classifier with frozen encoder
         # Feature vectors are extracted from encoder only, not the projection head 
         best_acc = 0
-        train_loss, train_acc = [], []
-        val_loss, val_acc = [], []
+        train_losses, train_accs = [], []
+        val_losses, val_accs = [], []
 
         for epoch in range(self.config['linear_eval_epochs'] - done_epochs):         
-            pbar = tqdm(total=len(train_loader)+len(val_loader), decs='Epoch {}'.format(epoch+1))
+            pbar = tqdm(total=len(train_loader)+len(val_loader), desc='Epoch {:4d}'.format(epoch+1))
 
             # Training 
             clf_head.train()
@@ -204,18 +205,19 @@ class SimCLR:
                     h = self.encoder(img)
                 
                 # Loss and update
-                pred = clf_head(h)
-                loss = criterion(pred, target)
+                out = clf_head(h)
+                loss = criterion(out, target.to(self.device))
                 clf_optim.zero_grad()
                 loss.backward()
                 clf_optim.step()
 
                 # Accuracy
+                pred = out.argmax(dim=1).cpu()
                 correct = pred.eq(target.view_as(pred)).sum().item()
-                train_acc.append(correct)
-                train_loss.append(loss.item())
+                train_accs.append(correct)
+                train_losses.append(loss.item())
                 pbar.update(1)
-            train_loss, train_acc = np.mean(train_loss), np.mean(train_acc)
+            train_loss, train_acc = np.mean(train_losses), np.mean(train_accs)
 
             # Validation
             clf_head.eval()
@@ -225,15 +227,22 @@ class SimCLR:
                     h = self.encoder(img)
                 
                 # Loss
-                pred = clf_head(h)
-                loss = F.nll_loss(pred, target, reduction='mean')
+                out = clf_head(h).cpu()
+                loss = F.nll_loss(out, target, reduction='mean')
                 
                 # Accuracy
+                pred = out.argmax(dim=1)
                 correct = pred.eq(target.view_as(pred)).sum().item()
-                val_acc.append(correct)
-                val_loss.append(loss.item())
+                val_accs.append(correct)
+                val_losses.append(loss.item())
                 pbar.update(1)
-            val_loss, val_acc = np.mean(val_loss), np.mean(val_acc)
+            val_loss, val_acc = np.mean(val_losses), np.mean(val_accs)
+
+            # Update pbar
+            pbar.set_description('[Epoch] {:4d} [Train loss] {:.4f} [Train acc] {:.4f} [Val loss] {:.4f} [Val acc] {:.4f}'.format(
+                epoch+1, train_loss, train_acc, val_loss, val_acc
+            ))
+            pbar.close()
 
             # Save model if better
             if val_acc > best_acc:
@@ -249,12 +258,6 @@ class SimCLR:
                 'clf_scheduler': clf_scheduler.state_dict()
             }
             torch.save(current_state, os.path.join(self.output_dir, 'simclr/{}/{}_linear_eval.ckpt'.format(data_name, enc_name)))
-            
-            # Update pbar
-            pbar.set_description('[Epoch] {:3d} [Train loss] {:.4f} [Train acc] {:.4f} [Val loss] {:.4f} [Val acc] {:.4f}'.format(
-                epoch+1, train_loss, train_acc, val_loss, val_acc
-            ))
-            pbar.close()
 
         return {'acc': val_acc}
 
@@ -275,7 +278,7 @@ class SimCLR:
         fvecs = np.array(fvecs)
 
         # Mine neighbors and save
-        index = faiss.IndexFlatIP(dim=fvecs.shape[1])
+        index = faiss.IndexFlatIP(fvecs.shape[1])
         index = faiss.index_cpu_to_all_gpus(index)
         index.add(fvecs)
         _, indices = index.search(fvecs, topk+1)
@@ -373,7 +376,7 @@ class SCAN:
         loss_dict = {}
         total_loss_counter = []
         pred_labels, target_labels = [], []
-        pbar = tqdm(total=len(val_loader), desc="Val epoch {}".format(epoch))
+        pbar = tqdm(total=len(val_loader), desc="Val epoch {:4d}".format(epoch))
 
         for idx, batch in enumerate(val_loader):
             anchor_img, neighbor_img = data['anchor_img'].to(self.device), data['neighbor_img'].to(self.device)
@@ -421,7 +424,7 @@ class SCAN:
         
         remapped_preds = np.zeros(len(pred_labels))
         for pred_i, target_i in match:
-            remapped_preds[pred_labels = int(pred_i)] == int(target_i)
+            remapped_preds[pred_labels == int(pred_i)] = int(target_i)
 
         cls_acc = {}
         for i in np.unique(remapped_preds):
@@ -523,7 +526,7 @@ class Selflabel:
         """ Assesses predicition quality """
 
         pred_labels, target_labels = [], []
-        pbar = tqdm(total=len(val_loader), desc='Val epoch {}'.format(epoch))
+        pbar = tqdm(total=len(val_loader), desc='Val epoch {:4d}'.format(epoch))
 
         for idx, data in enumerate(val_loader):
             img = data['img'].to(self.device)
@@ -581,24 +584,33 @@ class Selflabel:
 
 class Trainer:
 
-    def __init__(self, config_name, config, output_dir):
+    def __init__(self, config, output_dir):
         # Config file should preferably have format -> (task)_(dataset)_(backbone_name).yaml
         # For example: simclr_cifar10_resnet18.yaml
         # Valid tasks: simclr, scan, selflabel
         # Valid backbone names: resnet18, resnet50, resnet101
         # Valid datasets: cifar10, cifar100, stl10 
 
-        self.task, self.data_name, self.model_name = config_name.split('_')
         self.config, self.output_dir = config, output_dir
+        self.task = self.config['task']
+        self.data_name = self.config['dataset']['name']
+        self.model_name = self.config['encoder']['name']
 
-        if 'simclr' in config_name:
-            self.model = train_utils.SimCLR(self.config, self.output_dir)
+        # Build dirs inside output_dir based on task and dataset
+        if not os.path.exists(os.path.join(output_dir, '{}/{}'.format(self.task, self.data_name))):
+            os.makedirs(os.path.join(output_dir, '{}/{}'.format(self.task, self.data_name)))
+
+        if self.task == 'simclr':
+            self.model = SimCLR(self.config, self.output_dir)
         
-        elif 'scan' in self.config_name:
-            self.model = train_utils.SCAN(self.config, self.output_dir)
+        elif self.task == 'scan':
+            self.model = SCAN(self.config, self.output_dir)
 
-        elif 'selflabel' in self.config_name:
-            self.model = train_utils.Selflabel(self.config, self.output_dir)
+        elif self.task == 'selflabel':
+            self.model = Selflabel(self.config, self.output_dir)
+
+        else:
+            raise ValueError('Unrecognized task {}'.format(self.task))
 
         # Initialize wandb
         wandb.init(self.task)
@@ -608,6 +620,7 @@ class Trainer:
         """ Trains the model for specified number of epochs """
 
         # Restart from last checkpoint if there exists one
+        done_epochs = 0
         try:
             files = os.listdir(os.path.join(self.output_dir, '{}/{}/'.format(self.task, self.data_name)))
             if len(files) > 0:
@@ -622,19 +635,19 @@ class Trainer:
                 if self.model.lr_scheduler is not None:
                     self.model.lr_scheduler.load_state_dict(ckpt['scheduler'])
         except:
-            done_epochs = 0
+            print("\n[INFO] No checkpoint found, starting afresh")
 
         # Train
         for epoch in range(self.config['epochs'] - done_epochs):
             
-            pbar = tqdm(total=len(train_loader), desc='Train epoch {}'.format(epoch+1))
+            pbar = tqdm(total=len(train_loader), desc='Train epoch {:4d}'.format(epoch+1))
             epoch_metrics = {}
 
             for idx, data in enumerate(train_loader):
                 step = epoch * len(train_loader) + idx 
                 metrics = self.model.train_one_step(data)
                 for key, value in metrics.items():
-                    if indx == 0:
+                    if idx == 0:
                         epoch_metrics[key] = [value] 
                     else:
                         epoch_metrics[key].append(value) 
@@ -643,9 +656,9 @@ class Trainer:
                 pbar.update(1)
 
             # Logs
-            log = f"[Train Epoch] {epoch+1} - "
+            log = "[Train Epoch] {:4d} [LR] {:.4f} ".format(epoch+1, self.model.optim.param_groups[0]['lr'])
             for k, v in epoch_metrics.items():
-                log += f"[{key}] {round(np.mean(value), 4)} - "
+                log += f"[{key}] {round(np.mean(value), 4)} "
             pbar.set_description(log)
             logging.info(log)
             wandb.log({'lr': self.model.optim.param_groups[0]['lr'], 'epoch': epoch})
@@ -658,9 +671,9 @@ class Trainer:
 
                 # Save model if better in accuracy
                 if val_metrics['acc'] > best_acc:
-                    
+
                     print("\n[INFO] Saving data; accuracy improved from {:.4f} -> {:.4f}".format(best_acc, val_metrics['acc']))
-                    best_acc = val_metrics['acc']:
+                    best_acc = val_metrics['acc']
                     torch.save(self.model.encoder.state_dict(), os.path.join(self.output_dir, '{}/{}/{}_best_encoder.ckpt'.format(
                         self.task, self.data_name, self.model_name
                     )))
@@ -670,7 +683,7 @@ class Trainer:
 
             # Update learning rate
             if (epoch+1) < self.model.warmup_epochs:
-                self.model.optim.param_groups[0]['lr'] = (epoch+1)/model.warmup_epochs * self.model.lr
+                self.model.optim.param_groups[0]['lr'] = (epoch+1)/self.model.warmup_epochs * self.model.lr
             elif self.model.lr_scheduler is not None:
                 self.model.lr_scheduler.step()
 
