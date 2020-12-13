@@ -31,16 +31,12 @@ def sample_weights(labels):
     return cls_weights[list(map(int, labels))]
 
 
-def get_dataset(config, split, transforms, return_items):
+def get_dataset(name, dataroot, split, transforms, return_items):
     """
     Generates a dataset object with required images and/or labels 
     transformed as specified.
     """
-    name = config['dataset'].get('name', None)
-    if name not in list(DATASET_HELPER.keys()):
-        raise ValueError('Invalid dataset; should be one of (cifar10, cifar100, stl10)')
     base_class = DATASET_HELPER[name]['data']
-    root = config['dataset'].get('root', './')
 
     # Image dataset class
     class ImageDataset(base_class):
@@ -63,7 +59,7 @@ def get_dataset(config, split, transforms, return_items):
             return {key: data[key] for key in self.return_items}
 
     # Return dataset object
-    return ImageDataset(root=root, train=split=='train', transforms=transforms, return_items=return_items)
+    return ImageDataset(root=dataroot, train=split=='train', transforms=transforms, return_items=return_items)
 
 
 class NeighborDataset:
@@ -87,27 +83,12 @@ class NeighborDataset:
         return len(self.img_dataset)
 
 
-def get_dataloader(config, dataset, weigh=False, shuffle=False):
+def get_dataloader(dataset, batch_size, num_workers=1, shuffle=False, weigh=False, drop_last=False):
     """ Returns a DataLoader with specified configuration """
 
     if weigh:
         weights = sample_weights(dataset.targets)
         sampler = WeightedRandomSampler(weights, len(weights), replacement=True)
-        return DataLoader(dataset, batch_size=config['batch_size'], num_workers=config['num_workers'], sampler=sampler)
+        return DataLoader(dataset, batch_size=batch_size, num_workers=num_workers, sampler=sampler, drop_last=drop_last)
     else:
-        return DataLoader(dataset, batch_size=config['batch_size'], num_workers=config['num_workers'], shuffle=shuffle)
-
-
-class Scalar:
-
-    def __init__(self):
-        self.count = 0
-        self.value = 0
-        self.sum = 0
-        self.mean = 0
-
-    def update(self, x):
-        self.count += 1
-        self.value = x
-        self.sum += x 
-        self.mean = self.sum/self.count
+        return DataLoader(dataset, batch_size=batch_size, num_workers=num_workers, shuffle=shuffle, drop_last=drop_last)

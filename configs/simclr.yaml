@@ -4,74 +4,15 @@
 
 # General
 task: simclr
-epochs: 1000
-batch_size: 512
+dataset: cifar10
+batch_size: 256
 num_workers: 8
+epochs: 1000
 eval_every: 100
-save_every: 100
+# number of neighbours
+n_neighbours: 20
 
-# Model
-encoder:
-  name: resnet18
-  pretrained: False
-  zero_init_residual: False 
-
-head:
-  in_dim: 512
-  out_dim: 128
-
-optimizer:
-  name: sgd
-  lr: 1.0
-  weight_decay: 1.e-06
-
-scheduler:
-  name: cosine
-  warmup_epochs: 10
-
-criterion:
-  normalize: False
-  temperature: 0.5
-
-
-# Linear classifier
-linear_eval_epochs: 100
-
-clf_optimizer:
-  name: adam
-  lr: 0.01
-  weight_decay: 1.e-06
-
-clf_scheduler:
-  name: cosine
-  warmup_epochs: 10
-
-
-# Data
-dataset:
-  name: cifar10
-  n_classes: 10
-  root: data/cifar10
-
-# Transforms
-train_transform:
-  random_resized_crop: 
-    size: [32, 32]
-    scale: [0.008, 1.0]
-  random_flip:
-  to_tensor:
-  normalize:
-    mean: [0.4914, 0.4822, 0.4465]
-    std:  [0.2023, 0.1994, 0.2010]
-
-val_transform:
-  center_crop: 
-    size: [32, 32]
-  to_tensor:
-  normalize:
-    mean: [0.4914, 0.4822, 0.4465]
-    std:  [0.2023, 0.1994, 0.2010]
-
+# Data Transforms
 aug_transform:
   color_jitter:
     brightness: 0.4
@@ -93,24 +34,71 @@ aug_transform:
     mean: [0.4914, 0.4822, 0.4465]
     std:  [0.2023, 0.1994, 0.2010]
 
+std_transform:
+  center_crop: 
+    size: [32, 32]
+  to_tensor:
+  normalize:
+    mean: [0.4914, 0.4822, 0.4465]
+    std:  [0.2023, 0.1994, 0.2010]
 
-# Dataset transformations
-data_transforms:
+# Data Loaders
+dataloaders:
   train:
-    img: train_transform
+    split: train
+    transforms: 
+      i: aug_transform
+      j: aug_transform
+    return_items: [i, j]
+    shuffle: True
+    drop_last: True
   val:
-    img: val_transform
-  main:
-    i: aug_transform
-    j: aug_transform
+    split: val
+    transforms: 
+      img: std_transform
+    return_items: [img, target]
+    shuffle: False
+    drop_last: False
+  eval_train:
+    split: train
+    transforms: 
+      img: std_transform
+    return_items: [img, target]
+    shuffle: False
+    drop_last: False
 
 
-# Dataset return items
-train_items: [img, target]
-val_items: [img, target]
-main_items: [i, j]
+# Networks
+encoder:
+  name: resnet18
+  pretrained: False
+  zero_init_residual: False 
 
+proj_head:
+  in_dim: 512
+  out_dim: 128
 
+# Optimizers
+simclr_optim:
+  name: sgd
+  lr: 1.0
+  weight_decay: 1.e-06
 
+simclr_lr_scheduler:
+  name: cosine
+  warmup_epochs: 10
 
+simclr_criterion:
+  normalize: False
+  temperature: 0.5
 
+# Linear classifier
+linear_eval_epochs: 100
+
+clf_optimizer:
+  name: sgd
+  lr: 0.1
+  weight_decay: 0.0
+
+clf_scheduler:
+  name: cosine

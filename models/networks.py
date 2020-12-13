@@ -58,6 +58,13 @@ class Encoder(nn.Module):
         out = torch.flatten(out, 1)
         return out
 
+def init_weights(m):
+    """
+    Weight initializations for a layer.
+    """
+    if type(m) == nn.Linear:
+        m.weight.data.normal_(mean=0.0, std=0.01)
+        m.bias.data.zero_()
 
 class ProjectionHead(nn.Module):
 
@@ -68,6 +75,7 @@ class ProjectionHead(nn.Module):
         self.ReLU = nn.ReLU()
         self.W2 = nn.Linear(in_dim, out_dim)
         self.BN2 = nn.BatchNorm1d(out_dim)
+        self.apply(init_weights)
 
     def forward(self, x):
         out = self.BN2(self.W2(self.ReLU(self.BN1(self.W1(x)))))

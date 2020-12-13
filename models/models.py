@@ -6,77 +6,36 @@ Authors: Mukund Varma T, Nishant Prabhu
 """
 
 # Dependencies
-import torch 
-import torch.nn as nn
-import torch.nn.functional as F
-from torch.utils.data import DataLoader, WeightedRandomSampler
-from scipy.optimize import linear_sum_assignment
-import setup_utils 
-import data_utils
-import models 
-import losses
-from tqdm import tqdm 
-import numpy as np 
-import faiss
-import wandb
-import logging
+from . import networks
+from utils import common, train_utils, losses, eval_utils
+import torch
 import os
+import torch.nn.functional as F
+import numpy as np
+from data.datasets import DATASET_HELPER
 
+# def hungarian_match(preds, targets, preds_k, targets_k):
+#     """ 
+#     Lowest error matching between predicted and target classes.
+#     """
+#     # Based on implementation from IIC
+#     num_samples = targets.shape[0]
 
-# For color printing
-pallete = {
-    "default" : "\x1b[39m",
-    "black" : "\x1b[30m",
-    "red" : "\x1b[31m",
-    "green" : "\x1b[32m",
-    "yellow" : "\x1b[33m",
-    "blue" : "\x1b[34m",
-    "magenta" : "\x1b[35m",
-    "cyan" : "\x1b[36m",
-    "lightgray" : "\x1b[37m",
-    "darkgray" : "\x1b[90m",
-    "lightred" : "\x1b[91m",
-    "lightgreen" : "\x1b[92m",
-    "lightyellow" : "\x1b[93m",
-    "lightblue" : "\x1b[94m",
-    "lightmagenta" : "\x1b[95m",
-    "lightcyan" : "\x1b[96m",
-    "white" : "\x1b[97m",
-    "end" : "\033[0m"
-}
+#     assert preds_k == targets_k, 'Different number of unique classes in preds and targets'
+#     k = preds_k 
+#     num_correct = np.zeros((k, k))
 
+#     for c1 in range(k):
+#         for c2 in range(k):
+#             votes = int(((preds == c1) * (targets == c2)).sum())
+#             num_correct[c1, c2] = votes
 
-def init_weights(m):
-    """
-    Weight initializations for a layer.
-    """
-    if type(m) == nn.Linear:
-        m.weight.data.normal_(mean=0.0, std=0.01)
-        m.bias.data.zero_()
+#     match = linear_sum_assignment(num_samples - num_correct)
+#     match = np.array(list(zip(*match)))
 
-
-def hungarian_match(preds, targets, preds_k, targets_k):
-    """ 
-    Lowest error matching between predicted and target classes.
-    """
-    # Based on implementation from IIC
-    num_samples = targets.shape[0]
-
-    assert preds_k == targets_k, 'Different number of unique classes in preds and targets'
-    k = preds_k 
-    num_correct = np.zeros((k, k))
-
-    for c1 in range(k):
-        for c2 in range(k):
-            votes = int(((preds == c1) * (targets == c2)).sum())
-            num_correct[c1, c2] = votes
-
-    match = linear_sum_assignment(num_samples - num_correct)
-    match = np.array(list(zip(*match)))
-
-    # Return as list of tuples (out_c, gt_c)
-    res = [(out_c, gt_c) for out_c, gt_c in match]
-    return res
+#     # Return as list of tuples (out_c, gt_c)
+#     res = [(out_c, gt_c) for out_c, gt_c in match]
+#     return res
 
 
 # =================================================================================================
@@ -85,39 +44,48 @@ def hungarian_match(preds, targets, preds_k, targets_k):
 
 class SimCLR:
 
-    def __init__(self, config, output_dir):
-
+    def __init__(self, config, device, output_dir):
+        
         self.config = config
+        self.device = device
         self.output_dir = output_dir
-        self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-        print("\n{}[INFO] Device found: {}{}".format(pallete['yellow'], torch.cuda.get_device_name(0), pallete['end']))
-
+        
         # Models 
-        self.encoder = models.Encoder(**self.config['encoder']).to(self.device)
-        setup_utils.print_network(self.encoder, 'Encoder')
-        self.head = models.ProjectionHead(**self.config['head']).to(self.device)
-        setup_utils.print_network(self.head, 'Projection Head')
-        self.head.apply(init_weights)
+        self.encoder = networks.Encoder(**config['encoder']).to(self.device)
+        common.print_network(self.encoder, 'Encoder')
+        self.proj_head = networks.ProjectionHead(**config['proj_head']).to(self.device)
+        common.print_network(self.proj_head, 'Projection Head')
 
         # Optimizer, scheduler and criterion
-        self.optim = setup_utils.get_optimizer(
-            config = self.config['optimizer'], 
-            params = list(self.encoder.parameters())+list(self.head.parameters())
+        self.optim = train_utils.get_optimizer(
+            config = config['simclr_optim'], 
+            params = list(self.encoder.parameters())+list(self.proj_head.parameters())
         )
-        self.lr_scheduler, self.warmup_epochs = setup_utils.get_scheduler(
-            config = {**self.config['scheduler'], 'epochs': self.config['epochs']},
+        self.lr_scheduler, self.warmup_epochs = train_utils.get_scheduler(
+            config = {**config['simclr_lr_scheduler'], 'epochs': config['epochs']},
             optimizer = self.optim
         )
-        self.criterion = losses.SimclrLoss(**self.config['criterion'])
-        self.lr = self.config['optimizer']['lr']
-
+        self.lr = config['simclr_optim']['lr']
+        self.criterion = losses.SimclrLoss(**config['simclr_criterion'])
+        
+        self.best = 0
+        
+    def load_ckpt(self):
+        
+        ckpt = torch.load(os.path.join(self.output_dir, "last.ckpt"))
+        self.encoder.load_state_dict(ckpt["enc"])
+        self.proj_head.load_state_dict(ckpt["proj_head"])
+        self.optim.load_state_dict(ckpt["optim"])
+        if self.lr_scheduler is not None:
+            self.lr_scheduler.load_state_dict(ckpt["lr_scheduler"])
+        return ckpt["epoch"]
 
     def train_one_step(self, data):
         """ Trains model on one batch of data """
 
         img_i, img_j = data['i'].to(self.device), data['j'].to(self.device)
-        zi = self.head(self.encoder(img_i))
-        zj = self.head(self.encoder(img_j))
+        zi = self.proj_head(self.encoder(img_i))
+        zj = self.proj_head(self.encoder(img_j))
 
         self.optim.zero_grad()
         loss = self.criterion(zi, zj)
@@ -125,80 +93,80 @@ class SimCLR:
         self.optim.step()
         return {'loss': loss.item()}
 
+    def save_ckpt(self, epoch):
+        ckpt = {
+            "enc": self.encoder.state_dict(),
+            "proj_head": self.proj_head.state_dict(),
+            "optim": self.optim.state_dict(),
+            "lr_scheduler": self.lr_scheduler.state_dict(),
+            "epoch": epoch
+        }
+        torch.save(ckpt, os.path.join(self.output_dir, "last.ckpt"))
+    
+    def save_model(self, fname):
+        model_save = {
+            "enc": self.encoder.state_dict()
+        }
+        torch.save(model_save, os.path.join(self.output_dir, fname))
+    
+    @torch.no_grad()
+    def return_fvecs(self, data_loader):
+        """ Build feature vectors """
 
-    @staticmethod
-    def calculate_accuracy(z, targets, topk=20):
-        """ Computes accuracy of mined neighbors """
+        fvecs, gt = [], []
 
-        # Mine neighbors
-        index = faiss.IndexFlatIP(z.shape[1])
-        index = faiss.index_cpu_to_all_gpus(index)
-        index.add(z)
-        _, indices = index.search(z, topk+1)
-
-        # Compute accuracy 
-        anchor_targets = np.repeat(targets.reshape(-1, 1), topk, axis=1)
-        neighbor_targets = np.take(targets, indices[:, 1:], axis=0)
-        accuracy = np.mean(anchor_targets == neighbor_targets)
-        return accuracy
-
-
-    def validate(self, epoch, val_loader):
-        """ Neighbor mining accuracies wrapper function """
-
-        pbar = tqdm(total=len(val_loader), desc='Val epoch {:4d}'.format(epoch))
-        fvecs, labels = [], []
-
-        for data in val_loader:
+        for indx, data in enumerate(data_loader):
             img, target = data['img'].to(self.device), data['target']
-            with torch.no_grad():
-                z = self.head(self.encoder(img))
+            z = self.proj_head(self.encoder(img))
             z = F.normalize(z, p=2, dim=-1)
-            fvecs.append(z.detach().cpu().numpy())
-            labels.append(target.numpy())
-            pbar.update(1)
+            fvecs.extend(z.detach().cpu().numpy())
+            gt.extend(target.numpy())
+            common.progress_bar(progress=indx/len(data_loader))
+        common.progress_bar(progress=1)
 
-        fvecs, labels = np.array(fvecs), np.array(labels)
-        acc = SimCLR.calculate_accuracy(fvecs, labels, topk=20)
-
-        pbar.set_description('[Val epoch] {:4d} - [Accuracy] {:.4f}'.format(epoch, acc))
-        pbar.close()
-        return {'acc': acc}
-
+        fvecs, gt = np.array(fvecs), np.array(gt)
+        return fvecs, gt
+    
+    def validate(self, val_loader):
+        # validate 
+        
+        fvecs, gt = self.return_fvecs(val_loader)
+        neighbour_indices = eval_utils.find_neighbours(fvecs, topk=self.config["n_neighbours"])
+        acc = eval_utils.compute_neighbour_acc(gt, neighbour_indices, topk=self.config["n_neighbours"])
+        
+        if acc >= self.best:
+            self.save_model("best.pth")
+            self.best = acc
+        
+        return {'neighbour acc': acc}
 
     def linear_eval(self, train_loader, val_loader):
         """ Evaluation of SimCLR vectors with linear classifier """
 
-        data_name = self.config['dataset']['name']
-        enc_name = self.config['encoder']['name']
-
-        clf_head = models.ClassificationHead(in_dim=self.encoder.backbone_dim, n_classes=self.config['dataset']['n_classes']).to(self.device)
-        clf_optim = setup_utils.get_optimizer(config={**self.config['clf_optimizer']}, params=clf_head.parameters())
-        clf_scheduler, _ = setup_utils.get_scheduler(config={**self.config['clf_scheduler'], 'epochs': self.config['epochs']}, optimizer=clf_optim)
+        clf_head = networks.ClassificationHead(
+            in_dim=self.encoder.backbone_dim, 
+            n_classes=DATASET_HELPER[self.config['dataset']]['classes']
+        ).to(self.device)
+        clf_optim = train_utils.get_optimizer(
+            config={**self.config['clf_optimizer']}, 
+            params=clf_head.parameters()
+        )
+        clf_scheduler, _ = train_utils.get_scheduler(
+            config={**self.config['clf_scheduler'], 'epochs': self.config['linear_eval_epochs']}, 
+            optimizer=clf_optim
+        )
         criterion = losses.SupervisedLoss()
-        done_epochs = 0
 
-        # If a checkpoint exists, load it
-        ckpt_path = os.path.join(self.output_dir, 'simclr/{}/{}_linear_eval.ckpt'.format(data_name, enc_name))
-        if os.path.exists(ckpt_path):
-            print("\n{}[INFO] Resuming training from {}_linear_eval.ckpt{}".format(pallete['yellow'], enc_name, pallete['end']))
-            ckpt = torch.load(ckpt_path)
-            done_epochs = ckpt['epoch']
-            clf_head.load_state_dict(ckpt['clf_head'])
-            clf_optim.load_state_dict(ckpt['clf_optim'])
-            clf_scheduler.load_state_dict(ckpt['clf_scheduler'])
-
-        # Train classifier with frozen encoder
-        # Feature vectors are extracted from encoder only, not the projection head 
-        best_acc = 0
-        train_losses, train_accs = [], []
-        val_losses, val_accs = [], []
-
-        for epoch in range(self.config['linear_eval_epochs'] - done_epochs):         
-            pbar = tqdm(total=len(train_loader)+len(val_loader), desc='Epoch {:4d}'.format(epoch+1))
+        best = 0
+        train_metrics = common.AverageMeter()
+        val_metrics = common.AverageMeter()
+        for epoch in range(1, self.config['linear_eval_epochs']+1):   
+            train_metrics.reset()
+            val_metrics.reset()
 
             # Training 
             clf_head.train()
+            epoch
             for batch in train_loader:
                 img, target = batch['img'].to(self.device), batch['target']
                 with torch.no_grad():    
@@ -214,10 +182,7 @@ class SimCLR:
                 # Accuracy
                 pred = out.argmax(dim=1).cpu()
                 correct = pred.eq(target.view_as(pred)).sum().item()
-                train_accs.append(correct)
-                train_losses.append(loss.item())
-                pbar.update(1)
-            train_loss, train_acc = np.mean(train_losses), np.mean(train_accs)
+                train_metrics.add({"train acc": correct/len(batch), "train loss": loss.item()})
 
             # Validation
             clf_head.eval()
@@ -228,81 +193,31 @@ class SimCLR:
                 
                 # Loss
                 out = clf_head(h).cpu()
-                loss = F.nll_loss(out, target, reduction='mean')
+                loss = criterion(out, target)
                 
                 # Accuracy
                 pred = out.argmax(dim=1)
                 correct = pred.eq(target.view_as(pred)).sum().item()
-                val_accs.append(correct)
-                val_losses.append(loss.item())
-                pbar.update(1)
-            val_loss, val_acc = np.mean(val_losses), np.mean(val_accs)
+                val_metrics.add({"val acc": correct/len(batch), "val loss": loss.item()})
 
-            # Update pbar
-            pbar.set_description('[Epoch] {:4d} [Train loss] {:.4f} [Train acc] {:.4f} [Val loss] {:.4f} [Val acc] {:.4f}'.format(
-                epoch+1, train_loss, train_acc, val_loss, val_acc
-            ))
-            pbar.close()
-
+            train_log = train_metrics.return_msg()
+            val_log = val_metrics.return_msg()
+            
+            common.progress_bar(progress=epoch/self.config["linear_eval_epochs"], status=train_log+val_log)
             # Save model if better
-            if val_acc > best_acc:
-                best_acc = val_acc
-                torch.save(clf_head.state_dict(), \
-                    os.path.join(self.output_dir, 'simclr/{}/{}_best_clf_head.ckpt'.format(data_name, enc_name)))
+            if  val_metrics.return_metrics()["val acc"] > best:
+                torch.save(clf_head.state_dict(), os.path.join(self.output_dir, 'best_clf_head.pth'))
+                best = val_metrics.return_metrics()["val acc"]
+            
+            if clf_scheduler is not None:
+                clf_scheduler.step()
 
-            # Save model
-            current_state = {
-                'epoch': epoch,
-                'clf_head': clf_head.state_dict(),
-                'clf_optim': clf_optim.state_dict(),
-                'clf_scheduler': clf_scheduler.state_dict()
-            }
-            torch.save(current_state, os.path.join(self.output_dir, 'simclr/{}/{}_linear_eval.ckpt'.format(data_name, enc_name)))
+        return {'linear eval acc': best}
 
-        return {'acc': val_acc}
-
-        
-    def find_neighbors(self, data_loader, img_key, fname, topk=20):
-        """ Mine neighbors with trained encoder and projection head """
-
-        # Generate vectors
-        pbar = tqdm(total=len(data_loader), desc='Building feature vectors')
-        fvecs = []
-        for batch in data_loader:
-            img = batch[img_key].to(self.device)
-            with torch.no_grad():
-                z = self.head(self.encoder(img))
-            fvecs.extend(z.cpu().detach().numpy())
-            pbar.update(1)
-        pbar.close()
-        fvecs = np.array(fvecs)
-
-        # Mine neighbors and save
-        index = faiss.IndexFlatIP(fvecs.shape[1])
-        index = faiss.index_cpu_to_all_gpus(index)
-        index.add(fvecs)
-        _, indices = index.search(fvecs, topk+1)
-        np.save(os.path.join(self.output_dir, 'simclr/{}/{}_{}.npy'.format(
-            self.config['dataset']['name'], self.config['encoder']['name'], fname
-        )), indices)
-
-
-    def save(self, epoch):
-        """ Save the model, optimizer and scheduler """
-
-        data_name = self.config['dataset']['name']
-        enc_name = self.config['encoder']['name']
-        state = {
-            'epoch': epoch,
-            'encoder': self.encoder.state_dict(),
-            'head': self.head.state_dict(),
-            'optim': self.optim.state_dict(),
-            'scheduler': self.lr_scheduler.state_dict() if self.lr_scheduler is not None else None
-        }
-        torch.save(state, os.path.join(self.output_dir, 'simclr/{}/{}_epoch_{}'.format(
-            data_name, enc_name, epoch
-        )))
-
+    def build_neighbours(self, data_loader, fname):
+        fvecs, _ = self.return_fvecs(data_loader)
+        neighbour_indices = eval_utils.find_neighbours(fvecs, topk=self.config["n_neighbours"])
+        np.save(os.path.join(self.output_dir, fname), neighbour_indices)
 
 # =============================================================================================
 # Clustering model for SCAN
@@ -600,129 +515,4 @@ class Selflabel:
             data_name, enc_name, epoch
         )))
 
-
-# ===================================================================================================
-# Trainer: Wrapper class to operate the classes above
-# ===================================================================================================
-
-class Trainer:
-
-    def __init__(self, config, output_dir):
-        # Config file should preferably have format -> (task)_(dataset)_(backbone_name).yaml
-        # For example: simclr_cifar10_resnet18.yaml
-        # Valid tasks: simclr, scan, selflabel
-        # Valid backbone names: resnet18, resnet50, resnet101
-        # Valid datasets: cifar10, cifar100, stl10 
-
-        self.config, self.output_dir = config, output_dir
-        self.task = self.config['task']
-        self.data_name = self.config['dataset']['name']
-        self.model_name = self.config['encoder']['name']
-
-        # Build dirs inside output_dir based on task and dataset
-        if not os.path.exists(os.path.join(output_dir, '{}/{}'.format(self.task, self.data_name))):
-            os.makedirs(os.path.join(output_dir, '{}/{}'.format(self.task, self.data_name)))
-
-        if self.task == 'simclr':
-            self.model = SimCLR(self.config, self.output_dir)
-        
-        elif self.task == 'scan':
-            self.model = SCAN(self.config, self.output_dir)
-
-        elif self.task == 'selflabel':
-            self.model = Selflabel(self.config, self.output_dir)
-
-        else:
-            raise ValueError('Unrecognized task {}'.format(self.task))
-
-        # Initialize wandb
-        wandb.init(self.task)
-        
-
-    def train(self, train_loader, val_loader):
-        """ Trains the model for specified number of epochs """
-
-        # Restart from last checkpoint if there exists one
-        done_epochs = 0
-        files = os.listdir(os.path.join(self.output_dir, '{}/{}/'.format(self.task, self.data_name)))
-        
-        if len(files) > 0:
-            latest = np.argmax([int(f.split('_')[-1]) for f in files])
-            ckpt_path = os.path.join(self.output_dir, '{}/{}/{}'.format(self.task, self.data_name, files[latest]))
-            ckpt = torch.load(ckpt_path)
-
-            done_epochs = ckpt['epoch']
-            self.model.encoder.load_state_dict(ckpt['encoder'])
-            self.model.head.load_state_dict(ckpt['head'])
-            self.model.optim.load_state_dict(ckpt['optim'])
-            if self.model.lr_scheduler is not None:
-                self.model.lr_scheduler.load_state_dict(ckpt['scheduler'])
-        else:
-            print("\n{}[INFO] No checkpoint found, starting afresh{}".format(pallete['yellow'], pallete['end']))
-
-        # Train
-        for epoch in range(self.config['epochs'] - done_epochs):
-            
-            pbar = tqdm(total=len(train_loader), desc='Train epoch {:4d}'.format(epoch+1))
-            epoch_metrics = {}
-
-            for idx, data in enumerate(train_loader):
-                step = epoch * len(train_loader) + idx 
-                metrics = self.model.train_one_step(data)
-                for key, value in metrics.items():
-                    if idx == 0:
-                        epoch_metrics[key] = [value] 
-                    else:
-                        epoch_metrics[key].append(value) 
-
-                wandb.log({**metrics, 'train_step': step})                
-                pbar.update(1)
-
-            # Logs
-            log = "[Train Epoch] {:4d} [LR] {:.4f} ".format(epoch+1, self.model.optim.param_groups[0]['lr'])
-            for k, v in epoch_metrics.items():
-                log += f"[{key}] {round(np.mean(value), 4)} "
-            pbar.set_description(log)
-            logging.info(log)
-            wandb.log({'lr': self.model.optim.param_groups[0]['lr'], 'epoch': epoch})
-            pbar.close()
-
-            # Validation
-            best_acc = 0
-            if (epoch+1) % self.config['eval_every']:
-                val_metrics = self.model.validate(epoch+1, val_loader)
-
-                # Save model if better in accuracy
-                if val_metrics['acc'] > best_acc:
-
-                    print("\n[INFO] Saving data; accuracy improved from {:.4f} -> {:.4f}".format(best_acc, val_metrics['acc']))
-                    best_acc = val_metrics['acc']
-                    torch.save(self.model.encoder.state_dict(), os.path.join(self.output_dir, '{}/{}/{}_best_encoder.ckpt'.format(
-                        self.task, self.data_name, self.model_name
-                    )))
-                    torch.save(self.model.head.state_dict(), os.path.join(self.output_dir, '{}/{}/{}_best_head.ckpt'.format(
-                        self.task, self.data_name, self.model_name
-                    )))
-
-            # Update learning rate
-            if (epoch+1) < self.model.warmup_epochs:
-                self.model.optim.param_groups[0]['lr'] = (epoch+1)/self.model.warmup_epochs * self.model.lr
-            elif self.model.lr_scheduler is not None:
-                self.model.lr_scheduler.step()
-
-            if (epoch+1) % self.config['save_every'] == 0:
-                self.model.save(epoch)
-
-        # For SCAN, overwrite best_head.ckpt with weights of only the best head
-        # Only useful for models with n_heads > 1, but works even if it's not the case
-        
-        if self.task == 'scan':
-            
-            best_head = self.model.find_best_head()
-            best_head_state = self.model.head.W[best_head].state_dict()
-            new_keys = ['W.0.weight', 'W.0.bias']
-
-            # Just need to modify the keys of the state_dict
-            bhs_mod = {new_k: v for new_k, (k, v) in zip(new_keys, best_head_state.items())}
-            torch.save(bhs_mod, os.path.join(self.output_dir, '{}/{}/{}_best_head.ckpt'.format(self.task, self.data_name, self.model_name)))
 

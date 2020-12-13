@@ -6,17 +6,104 @@ Authors: Mukund Varma T, Nishant Prabhu
 """
 
 # Dependencies
-import os
-import torch  
-import argparse
-import train_utils
-import setup_utils
-import data_utils
-import augmentations
-import numpy as np 
 from datetime import datetime as dt
+import argparse
+import os
+from utils import common
+from data import augmentations, datasets
+from models import models
+import wandb
 
+# ===================================================================================================
+# Trainer: helper class for training proceedure
+# ===================================================================================================
 
+class Trainer:
+    def __init__(self, args):
+        
+        # Initialize experiment
+        self.config, output_dir, self.logger, device = common.init_experiment(args, seed=420)
+        
+        # get datasets and transforms
+        self.data_loaders = {}
+        for key, params in self.config["dataloaders"].items():
+            transforms = {key: augmentations.get_transform(self.config[value]) for key, value in params["transforms"].items()}
+            dataset = datasets.get_dataset(
+                name=self.config["dataset"], 
+                dataroot=os.path.join(output_dir.split("/")[0], "data"), 
+                split=params["split"], 
+                transforms=transforms, 
+                return_items=params["return_items"]
+            )
+            shuffle = params.get("shuffle", False)
+            weigh = params.get("weigh", False)
+            self.data_loaders[key] = datasets.get_dataloader(
+                dataset=dataset, 
+                batch_size=self.config["batch_size"], 
+                num_workers=self.config["num_workers"], 
+                shuffle=shuffle, 
+                weigh=weigh
+            )
+        
+        if self.config["task"] == "simclr":
+            self.model = models.SimCLR(config=self.config, device=device, output_dir=output_dir)
+        
+        if os.path.exists(os.path.join(output_dir, "last.ckpt")):
+            self.epoch_start = self.model.load_ckpt()
+            self.logger.print(f"Loaded checkpoint. Resuming from {self.epoch_start} epochs...", mode="info")
+            self.logger.write(f"Loaded checkpoint. Resuming from {self.epoch_start} epochs...", mode="info")
+        else:
+            self.epoch_start = 1
+            self.logger.print(f"Checkpoint not found. Starting fresh...", mode="info")
+            self.logger.write(f"Checkpoint not found. Starting fresh...", mode="info")
+        
+    def train(self):
+        epoch_meter = common.AverageMeter()
+        wandb.init(self.config["task"])
+        
+        for epoch in range(self.epoch_start, self.config["epochs"]+1):
+            self.logger.print(f"Epoch [{epoch}/{self.config['epochs']}]", mode="info")
+            self.logger.write(f"Epoch [{epoch}/{self.config['epochs']}]", mode="info")
+            epoch_meter.reset()
+            for indx, data in enumerate(self.data_loaders["train"]):
+                train_metric = self.model.train_one_step(data)
+                wandb.log(train_metric)
+                epoch_meter.add(train_metric)
+                common.progress_bar(progress=indx/len(self.data_loaders["train"]), status=epoch_meter.return_msg())
+            common.progress_bar(progress=1)
+            self.logger.print(epoch_meter.return_msg(), mode="train")
+            self.logger.write(epoch_meter.return_msg(), mode="train")
+            wandb.log({"lr": self.model.optim.param_groups[0]['lr'], "train epoch": epoch})
+            if epoch < self.model.warmup_epochs:
+                self.model.optim.param_groups[0]['lr'] = epoch/self.model.warmup_epochs * self.model.lr
+            if self.model.lr_scheduler is not None:
+                self.model.lr_scheduler.step()
+            self.model.save_ckpt(epoch)
+            
+            if epoch%self.config["eval_every"] == 0 or epoch == 1:
+                metrics = self.model.validate(val_loader=self.data_loaders["val"])
+                wandb.log({**metrics, "val epoch": epoch})
+                
+                msg = "".join([f"{key}: {round(value, 3)} " for key, value in metrics.items()])
+                self.logger.print(msg, mode="val")
+                self.logger.write(msg, mode="val")
+                
+                self.model.save_model(f"{epoch}.pth")
+        
+        self.logger.print("Training complete", mode="info")
+        self.logger.write("Training complete", mode="info")
+        
+        if self.config["task"] == "simclr":
+            self.logger.print("Linear eval", mode="info")
+            self.logger.write("Linear eval", mode="info")
+            
+            metrics = self.model.linear_eval(train_loader=self.data_loaders["eval_train"], val_loader=self.data_loaders["val"])
+            msg = f"Linear eval acc: {metrics['linear eval acc']}"
+            self.logger.print(msg, mode="val")
+            self.logger.write(msg, mode="val")
+            
+            self.model.build_neighbours(self.data_loaders["eval_train"], "train_neighbours.npy")
+            self.model.build_neighbours(self.data_loaders["val"], "val_neighbours.npy")
 
 if __name__ == "__main__":
 
@@ -25,86 +112,5 @@ if __name__ == "__main__":
     parser.add_argument('-o', '--output', default=dt.now().strftime('%Y-%m-%d_%H-%M'), type=str, help='Output directory')
     args = vars(parser.parse_args())
     
-    # Initialize experiment
-    config, output_dir = setup_utils.init_experiment(args, seed=420)
-
-    # Generate transforms
-    data_transforms = {
-        'train_transform': augmentations.get_transform(config['train_transform']),
-        'val_transform': augmentations.get_transform(config['val_transform']),
-        'aug_transform': augmentations.get_transform(config['aug_transform'])
-    }
-
-    # Generate datasets
-    train_dset = data_utils.get_dataset(
-        config = config, 
-        split = 'train', 
-        transforms = {k: data_transforms[v] for k, v in config['data_transforms']['train'].items()}, 
-        return_items = config['train_items']
-    )
-    val_dset = data_utils.get_dataset(
-        config = config, 
-        split = 'val', 
-        transforms = {k: data_transforms[v] for k, v in config['data_transforms']['val'].items()}, 
-        return_items = config['val_items']
-    )
-    main_dset = data_utils.get_dataset(
-        config = config, 
-        split = 'train', 
-        transforms = {k: data_transforms[v] for k, v in config['data_transforms']['main'].items()}, 
-        return_items = config['main_items']
-    )
-
-    main_loader = data_utils.get_dataloader(config, main_dset, weigh=True, shuffle=True)
-    val_loader = data_utils.get_dataloader(config, val_dset, weigh=False, shuffle=False)
-    train_loader = data_utils.get_dataloader(config, train_dset, weigh=False, shuffle=False)
-
-
-    # Begin training
-    trainer = train_utils.Trainer(config, output_dir)
-    print("\n[INFO] Beginning training ...")
-
-    if trainer.task == 'simclr':
-    
-        # Train
-        trainer.train(main_loader, val_loader)
-        
-        # Linear 
-        print('\n[INFO] Linear evaluation ...')
-        val_acc = trainer.model.linear_eval(train_loader, val_loader)
-
-        # Neighbor mining
-        print("\n[INFO] Mining neighbors ...")
-        trainer.model.find_neighbors(train_loader, 'img', 'train_neighbors', topk=20)
-        trainer.model.find_neighbors(val_loader, 'img', 'val_neighbors', topk=20)
-
-
-    elif trainer.task == 'scan':
-
-        # Load neighbors
-        train_neighbors = np.load(os.path.join(output_dir, 'simclr/{}/{}_train_neighbors.npy'.format(
-            config['dataset']['name'], config['encoder']['name']
-        )))
-        val_neighbors = np.load(os.path.join(output_dir, 'simclr/{}/{}_val_neighbors.npy'.format(
-            config['dataset']['name'], config['encoder']['name']
-        )))
-
-        # Generate datasets and loaders specific to SCAN
-        scan_train_dset = data_utils.NeighborDataset(train_dset, train_neighbors)
-        scan_val_dset = data_utils.NeighborDataset(val_dset, val_neighbors)
-        scan_train_loader = data_utils.get_dataloader(config, scan_train_dset, weigh=False, shuffle=True)
-        scan_val_loader = data_utils.get_dataloader(config, scan_val_dset, weigh=False, shuffle=False)
-
-        # Train
-        trainer.train(scan_train_loader, scan_val_loader)
-        
-
-    elif trainer.task == 'selflabel':
-
-        # Train
-        trainer.train(main_loader, val_loader)
-
-    else:
-        raise NotImplementedError("No task was found in the configuration file")
-
-
+    trainer = Trainer(args)
+    trainer.train()
