@@ -67,10 +67,10 @@ class SimclrLoss(nn.Module):
         return loss
 
 
-class ScanLoss(nn.Module):
+class ClusterLoss(nn.Module):
 
     def __init__(self, entropy_weight=2.0):
-        super(ScanLoss, self).__init__()
+        super(ClusterLoss, self).__init__()
         self.entropy_weight = entropy_weight
 
     def forward(self, anchor_logits, neighbor_logits):

@@ -14,6 +14,12 @@ from data import augmentations, datasets
 from models import models
 import wandb
 
+MODEL_HELPER = {
+    "simclr": models.SimCLR,
+    "cluster": models.ClusteringModel,
+    
+}
+
 # ===================================================================================================
 # Trainer: helper class for training proceedure
 # ===================================================================================================
@@ -35,18 +41,27 @@ class Trainer:
                 transforms=transforms, 
                 return_items=params["return_items"]
             )
+            if "neighbor_indices" in list(params.keys()):
+                dataset = datasets.NeighborDataset(
+                    img_dataset=dataset, 
+                    neighbor_indices=params["neighbor_indices"])
+            
             shuffle = params.get("shuffle", False)
             weigh = params.get("weigh", False)
+            drop_last = params.get("drop_last", False)
             self.data_loaders[key] = datasets.get_dataloader(
                 dataset=dataset, 
                 batch_size=self.config["batch_size"], 
                 num_workers=self.config["num_workers"], 
                 shuffle=shuffle, 
-                weigh=weigh
+                weigh=weigh,
+                drop_last=drop_last
             )
         
-        if self.config["task"] == "simclr":
-            self.model = models.SimCLR(config=self.config, device=device, output_dir=output_dir)
+        if self.config["task"] in list(MODEL_HELPER.keys()):
+            self.model = MODEL_HELPER[self.config["task"]](config=self.config, device=device, output_dir=output_dir)
+        else:
+            raise ValueError("Invalid model")
         
         if os.path.exists(os.path.join(output_dir, "last.ckpt")):
             self.epoch_start = self.model.load_ckpt()
@@ -60,6 +75,7 @@ class Trainer:
     def train(self):
         epoch_meter = common.AverageMeter()
         wandb.init(self.config["task"])
+        train_step = 0
         
         for epoch in range(self.epoch_start, self.config["epochs"]+1):
             self.logger.print(f"Epoch [{epoch}/{self.config['epochs']}]", mode="info")
@@ -67,9 +83,10 @@ class Trainer:
             epoch_meter.reset()
             for indx, data in enumerate(self.data_loaders["train"]):
                 train_metric = self.model.train_one_step(data)
-                wandb.log(train_metric)
+                wandb.log({**train_metric, "train step": train_step})
                 epoch_meter.add(train_metric)
                 common.progress_bar(progress=indx/len(self.data_loaders["train"]), status=epoch_meter.return_msg())
+                train_step += 1
             common.progress_bar(progress=1)
             self.logger.print(epoch_meter.return_msg(), mode="train")
             self.logger.write(epoch_meter.return_msg(), mode="train")
@@ -102,8 +119,8 @@ class Trainer:
             self.logger.print(msg, mode="val")
             self.logger.write(msg, mode="val")
             
-            self.model.build_neighbours(self.data_loaders["eval_train"], "train_neighbours.npy")
-            self.model.build_neighbours(self.data_loaders["val"], "val_neighbours.npy")
+            self.model.build_neighbors(self.data_loaders["eval_train"], "train_neighbors.npy")
+            self.model.build_neighbors(self.data_loaders["val"], "val_neighbors.npy")
 
 if __name__ == "__main__":
 

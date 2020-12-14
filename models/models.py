@@ -14,30 +14,6 @@ import torch.nn.functional as F
 import numpy as np
 from data.datasets import DATASET_HELPER
 
-# def hungarian_match(preds, targets, preds_k, targets_k):
-#     """ 
-#     Lowest error matching between predicted and target classes.
-#     """
-#     # Based on implementation from IIC
-#     num_samples = targets.shape[0]
-
-#     assert preds_k == targets_k, 'Different number of unique classes in preds and targets'
-#     k = preds_k 
-#     num_correct = np.zeros((k, k))
-
-#     for c1 in range(k):
-#         for c2 in range(k):
-#             votes = int(((preds == c1) * (targets == c2)).sum())
-#             num_correct[c1, c2] = votes
-
-#     match = linear_sum_assignment(num_samples - num_correct)
-#     match = np.array(list(zip(*match)))
-
-#     # Return as list of tuples (out_c, gt_c)
-#     res = [(out_c, gt_c) for out_c, gt_c in match]
-#     return res
-
-
 # =================================================================================================
 # Simple architecture for Contrastive Learning of Visual Representations (SimCLR)
 # =================================================================================================
@@ -98,9 +74,10 @@ class SimCLR:
             "enc": self.encoder.state_dict(),
             "proj_head": self.proj_head.state_dict(),
             "optim": self.optim.state_dict(),
-            "lr_scheduler": self.lr_scheduler.state_dict(),
             "epoch": epoch
         }
+        if self.lr_scheduler:
+            ckpt["lr_scheduler"] = self.lr_scheduler.state_dict()
         torch.save(ckpt, os.path.join(self.output_dir, "last.ckpt"))
     
     def save_model(self, fname):
@@ -131,8 +108,8 @@ class SimCLR:
         # validate 
         
         fvecs, gt = self.return_fvecs(val_loader)
-        neighbour_indices = eval_utils.find_neighbours(fvecs, topk=self.config["n_neighbours"])
-        acc = eval_utils.compute_neighbour_acc(gt, neighbour_indices, topk=self.config["n_neighbours"])
+        neighbour_indices = eval_utils.find_neighbors(fvecs, topk=self.config["n_neighbors"])
+        acc = eval_utils.compute_neighbour_acc(gt, neighbour_indices, topk=self.config["n_neighbors"])
         
         if acc >= self.best:
             self.save_model("best.pth")
@@ -214,182 +191,152 @@ class SimCLR:
 
         return {'linear eval acc': best}
 
-    def build_neighbours(self, data_loader, fname):
+    def build_neighbors(self, data_loader, fname):
         fvecs, _ = self.return_fvecs(data_loader)
-        neighbour_indices = eval_utils.find_neighbours(fvecs, topk=self.config["n_neighbours"])
+        neighbour_indices = eval_utils.find_neighbors(fvecs, topk=self.config["n_neighbors"])
         np.save(os.path.join(self.output_dir, fname), neighbour_indices)
 
 # =============================================================================================
 # Clustering model for SCAN
 # =============================================================================================
 
-class SCAN:
+class ClusteringModel:
 
-    def __init__(self, config, output_dir):
-        self.config = config
-        self.output_dir = output_dir
-        self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-        print("\n{}[INFO] Found device: {}\n{}".format(pallete['yellow'], torch.cuda.get_device_name(0), pallete['end']))
-
-        # Models
-        self.encoder = models.Encoder(**self.config['encoder']).to(self.device)
-        setup_utils.print_network(self.encoder, name='Encoder')
-        self.head = models.ClusteringHead(**self.config['head']).to(self.device)
-        setup_utils.print_network(self.head, name='Clustering Head')
-
-        # Loss meters to keep track of loss for each head
-        self.loss_meters = [data_utils.Scalar() for _ in range(self.config['head']['heads'])]
+    def __init__(self, config, device, output_dir):
         
-        # Load SimCLR checkpoint into encoder   
-        try:
-            best_encoder = torch.load(os.path.join(self.output_dir, 'simclr/{}/{}_best_encoder.ckpt'))
-            self.encoder.load_state_dict(best_encoder)
-        except:
-            print("\n{}[WARN] Could not load SimCLR encoder! Starting with random initialization!{}".format(pallete['red'], pallete['end']))
+        self.config = config
+        self.device = device
+        self.output_dir = output_dir
+        
+        # Models 
+        save = torch.load(self.config["simclr_save"])
+        self.encoder = networks.Encoder(**config['encoder']).to(self.device)
+        self.encoder.load_state_dict(save["enc"])
+        common.print_network(self.encoder, 'Encoder')
+        self.cluster_head = networks.ClusteringHead(**config['cluster_head']).to(self.device)
+        common.print_network(self.cluster_head, 'Clustering Head')
 
-        # Optimizer, scheduler and loss function
-        self.optim = setup_utils.get_optimizer(
-            config = self.config['optimizer'], 
-            params = list(self.encoder.parameters())+list(self.head.parameters())
+        # Optimizer, scheduler and criterion
+        self.optim = train_utils.get_optimizer(
+            config = config['cluster_optim'], 
+            params = list(self.encoder.parameters())+list(self.cluster_head.parameters())
         )
-        self.lr_scheduler, self.warmup_epochs = setup_utils.get_scheduler(
-            config = self.config['scheduler'],
+        self.lr_scheduler, self.warmup_epochs = train_utils.get_scheduler(
+            config = {**config['cluster_lr_scheduler'], 'epochs': config['epochs']},
             optimizer = self.optim
         )
-        self.criterion = losses.ScanLoss(**self.config['criterion'])
-        self.lr = self.config['optimizer']['lr']
-
+        self.lr = config['cluster_optim']['lr']
+        self.criterion = losses.ClusterLoss(**config['cluster_criterion'])
+        
+        self.best = 0
+        self.best_head_indx = None
+    
+    def load_ckpt(self):
+        
+        ckpt = torch.load(os.path.join(self.output_dir, "last.ckpt"))
+        self.encoder.load_state_dict(ckpt["enc"])
+        self.cluster_head.load_state_dict(ckpt["cluster_head"])
+        self.optim.load_state_dict(ckpt["optim"])
+        if self.lr_scheduler is not None:
+            self.lr_scheduler.load_state_dict(ckpt["lr_scheduler"])
+        return ckpt["epoch"]
     
     def train_one_step(self, data):
         """ Trains model on one batch of data """
 
-        anchor_img, neighbor_img = data['anchor_img'].to(self.device), data['neighbor_img'].to(self.device)
-        anchor_out = self.head(self.encoder(anchor_img))
-        neighbor_out = self.head(self.encoder(neighbor_img))
+        anchor, neighbor = data['anchor'].to(self.device), data['neighbor'].to(self.device)
+        a_out = self.cluster_head(self.encoder(anchor))
+        n_out = self.cluster_head(self.encoder(neighbor))
+        
+        # compute losses for each head
+        t_loss, c_loss, e_loss = [], [], []
+        for a, n in zip(a_out, n_out):
+            t, c, e = self.criterion(a, n)
+            t_loss.append(t)
+            c_loss.append(c)
+            e_loss.append(e)
 
-        total_losses, consis_losses, entr_losses = [], [], []
-        for anchor, neighbor in zip(anchor_out, neighbor_out):
-            total_loss, consis_loss, entr_loss = self.criterion(anchor, neighbor)
-            total_losses.append(total_loss)
-            consis_losses.append(consis_loss)
-            entr_losses.append(entr_loss)
-
-        loss = torch.sum(torch.stack(total_losses, dim=0))
+        loss = torch.sum(torch.stack(t_loss, dim=0))
         self.optim.zero_grad()
         loss.backward()
         self.optim.step()
 
         metrics = {}
-        for i in range(len(total_losses)):
-            metrics[f'h{i}_total_loss'] = total_losses[i].item()
-            metrics[f'h{i}_consis_loss'] = consis_losses[i].item()
-            metrics[f'h{i}_entr_loss'] = entr_losses[i].item()
+        for i in range(len(t_loss)):
+            metrics[f'h{i} total loss'] = t_loss[i].item()
+            metrics[f'h{i} consistency loss'] = c_loss[i].item()
+            metrics[f'h{i} entropy loss'] = e_loss[i].item()
 
         return metrics
 
+    def save_ckpt(self, epoch):
+        ckpt = {
+            "enc": self.encoder.state_dict(),
+            "cluster_head": self.cluster_head.state_dict(),
+            "optim": self.optim.state_dict(),
+            "epoch": epoch
+        }
+        if self.lr_scheduler:
+            ckpt["lr_scheduler"] = self.lr_scheduler.state_dict()
+        torch.save(ckpt, os.path.join(self.output_dir, "last.ckpt"))
+    
+    def save_model(self, fname):
+        W = torch.nn.ModuleList(self.cluster_head.W[self.best_head_indx: self.best_head_indx+1])
+        model_save = {
+            "enc": self.encoder.state_dict(),
+            "cluster_head": W.state_dict()
+        }
+        torch.save(model_save, os.path.join(self.output_dir, fname))
 
-    def validate(self, epoch, val_loader):  
+    @torch.no_grad()
+    def validate(self, val_loader):  
         """ Computes metrics to assess quality of clustering """
+        
+        loss_cntr = common.AverageMeter()
+        pred, gt = [], []
 
-        loss_dict = {}
-        total_loss_counter = []
-        pred_labels, target_labels = [], []
-        pbar = tqdm(total=len(val_loader), desc="Val epoch {:4d}".format(epoch))
-
-        for idx, batch in enumerate(val_loader):
-            anchor_img, neighbor_img = data['anchor_img'].to(self.device), data['neighbor_img'].to(self.device)
+        for indx, data in enumerate(val_loader):
+            anchor, neighbor = data['anchor'].to(self.device), data['neighbor'].to(self.device)
             
-            # Freeze model and generate predictions
             with torch.no_grad():
-                anchor_out = self.head(self.encoder(anchor_img))
-                neighbor_out = self.head(self.encoder(neighbor_img))
+                a_out = self.cluster_head(self.encoder(anchor))
+                n_out = self.cluster_head(self.encoder(neighbor))
 
-            pred_labels.extend(np.concatenate([o.argmax(dim=1).unsqueeze(1).detach().cpu().numpy() for o in anchor_out], axis=1))
-            target_labels.extend(data['target'].numpy())
+            pred.extend(np.concatenate([o.argmax(dim=1).unsqueeze(1).detach().cpu().numpy() for o in a_out], axis=1))
+            gt.extend(data['target'].numpy())
 
             # Compute all losses and collect
-            total_loss, consistency_loss, entropy_loss = [], [], []
-            for i, (anchor, neighbor) in enumerate(zip(anchor_out, neighbor_out)):
-                tl, cl, el = self.criterion(anchor, neighbor)
-                self.loss_meters[i].update(tl)
-                total_loss.append(tl)
-                consistency_loss.append(cl)
-                entropy_loss.append(el)
+            for i, (a, n) in enumerate(zip(a_out, n_out)):
+                t, c, e = self.criterion(a, n)
+                loss_cntr.add(
+                    {
+                        f"h{i} total loss": t.item(),
+                        f'h{i} consistency loss': c.item(),
+                        f'h{i} entropy loss': e.item()
+                    }
+                )
+            common.progress_bar(progress=indx/len(val_loader))
 
-
-            # Collect loss for each head
-            for i in range(len(total_loss)):
-                if idx == 0:
-                    loss_dict[f'h{i}_total_loss'] = [total_loss[i]]
-                    loss_dict[f'h{i}_consis_loss'] = [consistency_loss[i]]
-                    loss_dict[f'h{i}_entr_loss'] = [entropy_loss[i]]
-                else:
-                    loss_dict[f'h{i}_total_loss'].append(total_loss[i])
-                    loss_dict[f'h{i}_consis_loss'].append(consistency_loss[i])
-                    loss_dict[f'h{i}_entr_loss'].append(entropy_loss[i])
-
-            total_loss_counter.append(np.array(total_loss).reshape(1, -1))
-            pbar.update(1)
-        pbar.close()
-
-        loss_dict = {k: np.mean(v) for k, v in loss_dict.items()}
-        total_loss_counter = np.mean(np.concatenate(total_loss_counter, axis=0), axis=0)
-        best_head_index = np.argmin(total_loss_counter)
-
+        loss = loss_cntr.return_metrics()
+        total_loss = {key: value for key, value in loss.items() if "total loss" in key}
+        self.best_head_indx = np.argmin(list(total_loss.values()))
+        
         # Hungarian matching accuracy for best head
-        pred_labels = np.array(pred_labels)[:, best_head_index]
-        target_labels = np.array(target_labels)
-        match = hungarian_match(pred_labels, target_labels, len(np.unique(pred_labels)), len(np.unique(target_labels)))
-        print("\nHungarian match: {}".format(match))
+        pred = np.array(pred)[:, self.best_head_indx]
+        gt = np.array(gt)
+        cls_map = eval_utils.hungarian_match(pred, gt, len(np.unique(pred)), len(np.unique(gt)))
         
-        remapped_preds = np.zeros(len(pred_labels))
-        for pred_i, target_i in match:
-            remapped_preds[pred_labels == int(pred_i)] = int(target_i)
+        remapped_pred = np.zeros(len(pred))
+        for pred_c, target_c in cls_map:
+            remapped_pred[pred == int(pred_c)] = int(target_c)
 
-        cls_acc = {}
-        for i in np.unique(remapped_preds):
-            indx = remapped_preds == i
-            cls_acc[int(i)] = (remapped_preds[indx] == target_labels[indx]).sum()/len(remapped_preds[indx])
+        acc = {}
+        for i in np.unique(remapped_pred):
+            indx = remapped_pred == i
+            acc[f"cls {i} acc"] = (remapped_pred[indx] == gt[indx]).sum()/len(remapped_pred[indx])
+        acc["acc"] = np.mean(list(acc.values()))
         
-        # Print relevant stuff 
-        print("\nValidation epoch {}".format(epoch))
-        for k, v in loss_dict.items():
-            print("\t{}: {:.4f}".format(k, v))
-        
-        print("\nHungarian accuracy")
-        for k, v in cls_acc.items():
-            print("\tClass {} - {:.4f}".format(k, v))
-
-        # Log class accuracy in wandb as histogram
-        data = [[k, v] for k, v in cls_acc.items()]
-        table = wandb.Table(data=data, columns=['cluster', 'accuracy'])
-        wandb.log({'cluster_accuracy_chart': wandb.plot.bar(table, 'cluster', 'accuracy', title='Cluster-wise accuracy')})
-
-        return {**loss_dict, "acc": np.mean(list(cls_acc.values()))}
-
-
-    def save(self, epoch):
-        """ Save the model """
-
-        data_name = self.config['dataset']['name']
-        enc_name = self.config['encoder']['name']
-        state = {
-            'epoch': epoch,
-            'encoder': self.encoder.state_dict(),
-            'head': self.head.state_dict(),
-            'optim': self.optim.state_dict(),
-            'scheduler': self.lr_scheduler.state_dict() if self.lr_scheduler is not None else None
-        }
-        torch.save(state, os.path.join(self.output_dir, 'scan/{}/{}_epoch_{}'.format(
-            data_name, enc_name, epoch
-        )))
-
-
-    def find_best_head(self):
-        """ Returns the head with lowest average total loss """
-
-        return np.argmin([m.mean for m in self.loss_meters])
-
+        return {**loss, **acc}
 
 # =============================================================================================
 # Self labelling model for SCAN

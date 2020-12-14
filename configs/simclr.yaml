@@ -9,8 +9,8 @@ batch_size: 256
 num_workers: 8
 epochs: 1000
 eval_every: 100
-# number of neighbours
-n_neighbours: 20
+# number of neighbors
+n_neighbors: 20
 
 # Data Transforms
 aug_transform:
@@ -52,6 +52,7 @@ dataloaders:
     return_items: [i, j]
     shuffle: True
     drop_last: True
+    weigh: True
   val:
     split: val
     transforms: 

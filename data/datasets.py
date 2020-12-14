@@ -69,7 +69,7 @@ class NeighborDataset:
         if 'img' not in list(self.img_dataset.transforms.keys()):
             raise ValueError('img key not found in transforms')
         self.img_dataset.return_items = ['img', 'target'] # sanity check
-        self.nbr_indices = neighbor_indices
+        self.nbr_indices = np.load(neighbor_indices)
 
     def __getitem__(self, i):
         # Get anchor and choose one of the possible neighbors
@@ -77,7 +77,7 @@ class NeighborDataset:
         pos_nbrs = self.nbr_indices[i]
         nbr_idx = random.choices(pos_nbrs, k=1)[0]
         nbr = self.img_dataset[nbr_idx]
-        return {'anchor': anchor['img'], 'neighbour': nbr['img'], 'target': anchor['target']}
+        return {'anchor': anchor['img'], 'neighbor': nbr['img'], 'target': anchor['target']}
 
     def __len__(self):
         return len(self.img_dataset)

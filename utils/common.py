@@ -31,7 +31,7 @@ def progress_bar(progress = 0, status = "", bar_len = 20):
 
 class AverageMeter:
     def __init__(self):
-        pass
+        self.reset()
     def reset(self):
         self.metrics = {}
     def add(self, metrics):
