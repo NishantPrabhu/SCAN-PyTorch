@@ -99,7 +99,7 @@ class SelflabelLoss(nn.Module):
         self.confidence = confidence
 
     def forward(self, anchor_logits, aug_logits):
-        bs, n_cls = anchor_probs.size()
+        bs, n_cls = anchor_logits.size()
         # compute probability
         anchor_probs = F.softmax(anchor_logits, dim=1)
         

@@ -17,7 +17,7 @@ import wandb
 MODEL_HELPER = {
     "simclr": models.SimCLR,
     "cluster": models.ClusteringModel,
-    
+    "selflabel": models.SelfLabel,
 }
 
 # ===================================================================================================

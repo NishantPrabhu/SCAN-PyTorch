@@ -1,14 +1,14 @@
-# Clustering configuration
+# Self Labelling configuration
 # Authors: Mukund Varma T, Nishant Prabhu
 
 # General
-task: cluster
+task: selflabel
 dataset: cifar10
-batch_size: 128
+batch_size: 1000
 num_workers: 8
-epochs: 50
+epochs: 200
 eval_every: 5
-simclr_save: cifar10/simclr/test/best.pth
+cluster_save: cifar10/cluster/test/best.pth
 
 # Data Transforms
 aug_transform:
@@ -38,17 +38,16 @@ dataloaders:
   train:
     split: train
     transforms: 
-      img: aug_transform
-    return_items: [img]
+      img: std_transform
+      img_aug: aug_transform
+    return_items: [img, img_aug]
     shuffle: True
-    neighbor_indices: cifar10/simclr/test/train_neighbors.npy
   val:
     split: val
     transforms: 
       img: std_transform
     return_items: [img, target]
     shuffle: False
-    neighbor_indices: cifar10/simclr/test/val_neighbors.npy
 
 # Networks
 encoder:
@@ -62,14 +61,14 @@ cluster_head:
   heads: 1
 
 # Optimizers
-cluster_optim:
+selflabel_optim:
   name: adam
   lr: 1.e-04
   weight_decay: 1.e-04
 
-cluster_lr_scheduler:
+selflabel_lr_scheduler:
   name: NULL
   warmup_epochs: 0
 
-cluster_criterion:
-  entropy_weight: 5.0
+selflabel_criterion:
+  confidence: 0.99
