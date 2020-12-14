@@ -1,0 +1,8 @@
+torchvision
+faiss_gpu
+torch
+numpy
+scipy
+faiss
+Pillow
+PyYAML
