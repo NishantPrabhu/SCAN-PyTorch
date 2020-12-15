@@ -20,8 +20,6 @@ def compute_neighbour_acc(targets, neighbor_indices, topk=20):
 
 def hungarian_match(pred, targets, pred_k, targets_k):
     num_samples = targets.shape[0]
-    # works only if num of clusters in prediction and targets are the same!
-    assert pred_k == targets_k
     num_correct = np.zeros((pred_k, pred_k))
 
     for c1 in range(pred_k):

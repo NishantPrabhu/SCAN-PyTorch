@@ -414,14 +414,13 @@ class SelfLabel:
         for indx, data in enumerate(val_loader):
             img = data['img'].to(self.device)
             with torch.no_grad():
-                out = self.cluster_head(self.encoder(img))[0]
+                out = self.cluster_head(self.encoder(img))
             
-            probs.extend(out.cpu().detach())
+            probs.append(torch.cat([o.unsqueeze(0).detach().cpu() for o in out], dim=0))
             gt.extend(data['target'])
             common.progress_bar(progress=indx/len(val_loader))
         common.progress_bar(progress=1)
-
-        probs, gt = torch.tensor(probs), torch.tensor(gt)
+        probs, gt = torch.cat(probs, dim=1)[0], torch.tensor(gt)
         cluster_score = eval_utils.eval_clusters(probs, gt)
         
         if cluster_score['acc'] >= self.best:
