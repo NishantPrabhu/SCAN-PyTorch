@@ -96,10 +96,10 @@ simclr_criterion:
 # Linear classifier
 linear_eval_epochs: 100
 
-clf_optimizer:
+clf_optim:
   name: sgd
   lr: 0.1
   weight_decay: 0.0
 
-clf_scheduler:
+clf_lr_scheduler:
   name: cosine

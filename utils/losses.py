@@ -1,9 +1,9 @@
 
-"""
+'''
 Loss functions for SimCLR and SCAN.
 
 Authors: Mukund Varma T, Nishant Prabhu
-"""
+'''
 
 # Dependencies 
 import torch 

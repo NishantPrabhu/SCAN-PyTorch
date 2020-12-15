@@ -1,9 +1,9 @@
 
-"""
+'''
 Training functions and classes.
 
 Authors: Mukund Varma T, Nishant Prabhu
-"""
+'''
 
 # Dependencies
 from . import networks
@@ -29,7 +29,7 @@ class SimCLR:
         # Models 
         self.encoder = networks.Encoder(**config['encoder']).to(self.device)
         common.print_network(self.encoder, 'Encoder')
-        self.proj_head = networks.ProjectionHead(**config['proj_head']).to(self.device)
+        self.proj_head = networks.ProjectionHead(in_dim=self.encoder.backbone_dim, **config['proj_head']).to(self.device)
         common.print_network(self.proj_head, 'Projection Head')
 
         # Optimizer, scheduler and criterion
@@ -48,16 +48,16 @@ class SimCLR:
         
     def load_ckpt(self):
         
-        ckpt = torch.load(os.path.join(self.output_dir, "last.ckpt"))
-        self.encoder.load_state_dict(ckpt["enc"])
-        self.proj_head.load_state_dict(ckpt["proj_head"])
-        self.optim.load_state_dict(ckpt["optim"])
+        ckpt = torch.load(os.path.join(self.output_dir, 'last.ckpt'))
+        self.encoder.load_state_dict(ckpt['enc'])
+        self.proj_head.load_state_dict(ckpt['proj_head'])
+        self.optim.load_state_dict(ckpt['optim'])
         if self.lr_scheduler is not None:
-            self.lr_scheduler.load_state_dict(ckpt["lr_scheduler"])
-        return ckpt["epoch"]
+            self.lr_scheduler.load_state_dict(ckpt['lr_scheduler'])
+        return ckpt['epoch']
 
     def train_one_step(self, data):
-        """ Trains model on one batch of data """
+        ''' Trains model on one batch of data '''
 
         img_i, img_j = data['i'].to(self.device), data['j'].to(self.device)
         zi = self.proj_head(self.encoder(img_i))
@@ -71,24 +71,24 @@ class SimCLR:
 
     def save_ckpt(self, epoch):
         ckpt = {
-            "enc": self.encoder.state_dict(),
-            "proj_head": self.proj_head.state_dict(),
-            "optim": self.optim.state_dict(),
-            "epoch": epoch
+            'enc': self.encoder.state_dict(),
+            'proj_head': self.proj_head.state_dict(),
+            'optim': self.optim.state_dict(),
+            'epoch': epoch
         }
         if self.lr_scheduler:
-            ckpt["lr_scheduler"] = self.lr_scheduler.state_dict()
-        torch.save(ckpt, os.path.join(self.output_dir, "last.ckpt"))
+            ckpt['lr_scheduler'] = self.lr_scheduler.state_dict()
+        torch.save(ckpt, os.path.join(self.output_dir, 'last.ckpt'))
     
     def save_model(self, fname):
         model_save = {
-            "enc": self.encoder.state_dict()
+            'enc': self.encoder.state_dict()
         }
         torch.save(model_save, os.path.join(self.output_dir, fname))
     
     @torch.no_grad()
     def return_fvecs(self, data_loader):
-        """ Build feature vectors """
+        ''' Build feature vectors '''
 
         fvecs, gt = [], []
 
@@ -108,28 +108,28 @@ class SimCLR:
         # validate 
         
         fvecs, gt = self.return_fvecs(val_loader)
-        neighbour_indices = eval_utils.find_neighbors(fvecs, topk=self.config["n_neighbors"])
-        acc = eval_utils.compute_neighbour_acc(gt, neighbour_indices, topk=self.config["n_neighbors"])
+        neighbour_indices = eval_utils.find_neighbors(fvecs, topk=self.config['n_neighbors'])
+        acc = eval_utils.compute_neighbour_acc(gt, neighbour_indices, topk=self.config['n_neighbors'])
         
         if acc >= self.best:
-            self.save_model("best.pth")
+            self.save_model('best.pth')
             self.best = acc
         
         return {'neighbour acc': acc}
 
     def linear_eval(self, train_loader, val_loader):
-        """ Evaluation of SimCLR vectors with linear classifier """
+        ''' Evaluation of SimCLR vectors with linear classifier '''
 
         clf_head = networks.ClassificationHead(
             in_dim=self.encoder.backbone_dim, 
             n_classes=DATASET_HELPER[self.config['dataset']]['classes']
         ).to(self.device)
         clf_optim = train_utils.get_optimizer(
-            config={**self.config['clf_optimizer']}, 
+            config={**self.config['clf_optim']}, 
             params=clf_head.parameters()
         )
         clf_scheduler, _ = train_utils.get_scheduler(
-            config={**self.config['clf_scheduler'], 'epochs': self.config['linear_eval_epochs']}, 
+            config={**self.config['clf_lr_scheduler'], 'epochs': self.config['linear_eval_epochs']}, 
             optimizer=clf_optim
         )
         criterion = losses.SupervisedLoss()
@@ -159,7 +159,7 @@ class SimCLR:
                 # Accuracy
                 pred = out.argmax(dim=1).cpu()
                 correct = pred.eq(target.view_as(pred)).sum().item()
-                train_metrics.add({"train acc": correct/len(batch), "train loss": loss.item()})
+                train_metrics.add({'train acc': correct/len(batch), 'train loss': loss.item()})
 
             # Validation
             clf_head.eval()
@@ -175,16 +175,16 @@ class SimCLR:
                 # Accuracy
                 pred = out.argmax(dim=1)
                 correct = pred.eq(target.view_as(pred)).sum().item()
-                val_metrics.add({"val acc": correct/len(batch), "val loss": loss.item()})
+                val_metrics.add({'val acc': correct/len(batch), 'val loss': loss.item()})
 
             train_log = train_metrics.return_msg()
             val_log = val_metrics.return_msg()
             
-            common.progress_bar(progress=epoch/self.config["linear_eval_epochs"], status=train_log+val_log)
+            common.progress_bar(progress=epoch/self.config['linear_eval_epochs'], status=train_log+val_log)
             # Save model if better
-            if  val_metrics.return_metrics()["val acc"] > best:
+            if  val_metrics.return_metrics()['val acc'] > best:
                 torch.save(clf_head.state_dict(), os.path.join(self.output_dir, 'best_clf_head.pth'))
-                best = val_metrics.return_metrics()["val acc"]
+                best = val_metrics.return_metrics()['val acc']
             
             if clf_scheduler is not None:
                 clf_scheduler.step()
@@ -193,7 +193,7 @@ class SimCLR:
 
     def build_neighbors(self, data_loader, fname):
         fvecs, _ = self.return_fvecs(data_loader)
-        neighbour_indices = eval_utils.find_neighbors(fvecs, topk=self.config["n_neighbors"])
+        neighbour_indices = eval_utils.find_neighbors(fvecs, topk=self.config['n_neighbors'])
         np.save(os.path.join(self.output_dir, fname), neighbour_indices)
 
 # =============================================================================================
@@ -209,11 +209,11 @@ class ClusteringModel:
         self.output_dir = output_dir
         
         # Models 
-        save = torch.load(self.config["simclr_save"])
+        save = torch.load(self.config['simclr_save'])
         self.encoder = networks.Encoder(**config['encoder']).to(self.device)
-        self.encoder.load_state_dict(save["enc"])
+        self.encoder.load_state_dict(save['enc'])
         common.print_network(self.encoder, 'Encoder')
-        self.cluster_head = networks.ClusteringHead(**config['cluster_head']).to(self.device)
+        self.cluster_head = networks.ClusteringHead(in_dim=self.encoder.backbone_dim, **config['cluster_head']).to(self.device)
         common.print_network(self.cluster_head, 'Clustering Head')
 
         # Optimizer, scheduler and criterion
@@ -233,16 +233,16 @@ class ClusteringModel:
     
     def load_ckpt(self):
         
-        ckpt = torch.load(os.path.join(self.output_dir, "last.ckpt"))
-        self.encoder.load_state_dict(ckpt["enc"])
-        self.cluster_head.load_state_dict(ckpt["cluster_head"])
-        self.optim.load_state_dict(ckpt["optim"])
+        ckpt = torch.load(os.path.join(self.output_dir, 'last.ckpt'))
+        self.encoder.load_state_dict(ckpt['enc'])
+        self.cluster_head.load_state_dict(ckpt['cluster_head'])
+        self.optim.load_state_dict(ckpt['optim'])
         if self.lr_scheduler is not None:
-            self.lr_scheduler.load_state_dict(ckpt["lr_scheduler"])
-        return ckpt["epoch"]
+            self.lr_scheduler.load_state_dict(ckpt['lr_scheduler'])
+        return ckpt['epoch']
     
     def train_one_step(self, data):
-        """ Trains model on one batch of data """
+        ''' Trains model on one batch of data '''
 
         anchor, neighbor = data['anchor'].to(self.device), data['neighbor'].to(self.device)
         a_out = self.cluster_head(self.encoder(anchor))
@@ -271,27 +271,27 @@ class ClusteringModel:
 
     def save_ckpt(self, epoch):
         ckpt = {
-            "enc": self.encoder.state_dict(),
-            "cluster_head": self.cluster_head.state_dict(),
-            "optim": self.optim.state_dict(),
-            "epoch": epoch
+            'enc': self.encoder.state_dict(),
+            'cluster_head': self.cluster_head.state_dict(),
+            'optim': self.optim.state_dict(),
+            'epoch': epoch
         }
         if self.lr_scheduler:
-            ckpt["lr_scheduler"] = self.lr_scheduler.state_dict()
-        torch.save(ckpt, os.path.join(self.output_dir, "last.ckpt"))
+            ckpt['lr_scheduler'] = self.lr_scheduler.state_dict()
+        torch.save(ckpt, os.path.join(self.output_dir, 'last.ckpt'))
     
     def save_model(self, fname):
         w = list(self.cluster_head.W[self.best_head_indx].state_dict().values())
-        w_keys = ["W.0.weight", "W.0.bias"]
+        w_keys = ['W.0.weight', 'W.0.bias']
         model_save = {
-            "enc": self.encoder.state_dict(),
-            "cluster_head": dict(zip(w_keys, w))
+            'enc': self.encoder.state_dict(),
+            'cluster_head': dict(zip(w_keys, w))
         }
         torch.save(model_save, os.path.join(self.output_dir, fname))
 
     @torch.no_grad()
     def validate(self, val_loader):  
-        """ Computes metrics to assess quality of clustering """
+        ''' Computes metrics to assess quality of clustering '''
         
         total_loss = common.AverageMeter()
         pred, gt = [], []
@@ -309,7 +309,7 @@ class ClusteringModel:
             # Compute all losses and collect
             for i, (a, n) in enumerate(zip(a_out, n_out)):
                 t, _, _ = self.criterion(a, n)
-                total_loss.add({f"h{i} total loss": t.item()})
+                total_loss.add({f'h{i} total loss': t.item()})
             common.progress_bar(progress=indx/len(val_loader))
         common.progress_bar(progress=1)
         
@@ -328,11 +328,11 @@ class ClusteringModel:
         acc = {}
         for i in np.unique(remapped_pred):
             indx = remapped_pred == i
-            acc[f"cls {i} acc"] = (remapped_pred[indx] == gt[indx]).sum()/len(remapped_pred[indx])
-        acc["acc"] = np.mean(list(acc.values()))
+            acc[f'cls {i} acc'] = (remapped_pred[indx] == gt[indx]).sum()/len(remapped_pred[indx])
+        acc['acc'] = np.mean(list(acc.values()))
         
-        if acc["acc"] >= self.best:
-            self.save_model("best.pth")
+        if acc['acc'] >= self.best:
+            self.save_model('best.pth')
             self.best = acc
         
         return {**acc}
@@ -350,12 +350,12 @@ class SelfLabel:
         self.output_dir = output_dir
         
         # Models 
-        save = torch.load(self.config["cluster_save"])
+        save = torch.load(self.config['cluster_save'])
         self.encoder = networks.Encoder(**config['encoder']).to(self.device)
-        self.encoder.load_state_dict(save["enc"])
+        self.encoder.load_state_dict(save['enc'])
         common.print_network(self.encoder, 'Encoder')
-        self.cluster_head = networks.ClusteringHead(**config['cluster_head']).to(self.device)
-        self.cluster_head.load_state_dict(save["cluster_head"])
+        self.cluster_head = networks.ClusteringHead(in_dim=self.encoder.backbone_dim, **config['cluster_head']).to(self.device)
+        self.cluster_head.load_state_dict(save['cluster_head'])
         common.print_network(self.cluster_head, 'Clustering Head')
 
         # Optimizer, scheduler and criterion
@@ -374,16 +374,16 @@ class SelfLabel:
     
     def load_ckpt(self):
         
-        ckpt = torch.load(os.path.join(self.output_dir, "last.ckpt"))
-        self.encoder.load_state_dict(ckpt["enc"])
-        self.cluster_head.load_state_dict(ckpt["cluster_head"])
-        self.optim.load_state_dict(ckpt["optim"])
+        ckpt = torch.load(os.path.join(self.output_dir, 'last.ckpt'))
+        self.encoder.load_state_dict(ckpt['enc'])
+        self.cluster_head.load_state_dict(ckpt['cluster_head'])
+        self.optim.load_state_dict(ckpt['optim'])
         if self.lr_scheduler is not None:
-            self.lr_scheduler.load_state_dict(ckpt["lr_scheduler"])
-        return ckpt["epoch"]
+            self.lr_scheduler.load_state_dict(ckpt['lr_scheduler'])
+        return ckpt['epoch']
 
     def train_one_step(self, data):
-        """ Trains model on one batch of data """
+        ''' Trains model on one batch of data '''
 
         img, img_aug = data['img'].to(self.device), data['img_aug'].to(self.device)
 
@@ -400,25 +400,25 @@ class SelfLabel:
 
     def save_ckpt(self, epoch):
         ckpt = {
-            "enc": self.encoder.state_dict(),
-            "cluster_head": self.cluster_head.state_dict(),
-            "optim": self.optim.state_dict(),
-            "epoch": epoch
+            'enc': self.encoder.state_dict(),
+            'cluster_head': self.cluster_head.state_dict(),
+            'optim': self.optim.state_dict(),
+            'epoch': epoch
         }
         if self.lr_scheduler:
-            ckpt["lr_scheduler"] = self.lr_scheduler.state_dict()
-        torch.save(ckpt, os.path.join(self.output_dir, "last.ckpt"))
+            ckpt['lr_scheduler'] = self.lr_scheduler.state_dict()
+        torch.save(ckpt, os.path.join(self.output_dir, 'last.ckpt'))
     
     def save_model(self, fname):
         model_save = {
-            "enc": self.encoder.state_dict(),
-            "cluster_head": self.cluster_head.state_dict()
+            'enc': self.encoder.state_dict(),
+            'cluster_head': self.cluster_head.state_dict()
         }
         torch.save(model_save, os.path.join(self.output_dir, fname))
 
     @torch.no_grad()
     def validate(self, val_loader):
-        """ Assesses prediction quality """
+        ''' Assesses prediction quality '''
 
         pred, gt = [], []
         for indx, data in enumerate(val_loader):
@@ -441,11 +441,11 @@ class SelfLabel:
         acc = {}
         for i in np.unique(remapped_pred):
             indx = remapped_pred == i
-            acc[f"cls {i} acc"] = (remapped_pred[indx] == gt[indx]).sum()/len(remapped_pred[indx])
-        acc["acc"] = np.mean(list(acc.values()))
+            acc[f'cls {i} acc'] = (remapped_pred[indx] == gt[indx]).sum()/len(remapped_pred[indx])
+        acc['acc'] = np.mean(list(acc.values()))
         
-        if acc["acc"] >= self.best:
-            self.save_model("best.pth")
+        if acc['acc'] >= self.best:
+            self.save_model('best.pth')
             self.best = acc
 
         return {**acc}

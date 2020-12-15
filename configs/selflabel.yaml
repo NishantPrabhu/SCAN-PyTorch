@@ -52,11 +52,9 @@ dataloaders:
 # Networks
 encoder:
   name: resnet18
-  pretrained: False
   zero_init_residual: False 
 
 cluster_head:
-  in_dim: 512
   n_clusters: 10
   heads: 1
 

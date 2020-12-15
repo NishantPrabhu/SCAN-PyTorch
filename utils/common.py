@@ -1,9 +1,9 @@
 
-"""
+'''
 Helper functions for initializing expt
 
 Authors: Mukund Varma T, Nishant Prabhu
-"""
+'''
 
 # Dependencies
 import random 
@@ -14,20 +14,20 @@ import yaml
 import logging 
 
 COLORS = {
-    "yellow" : "\x1b[33m",
-    "blue" : "\x1b[94m",    
-    "green" : "\x1b[32m",
-    "end" : "\033[0m"
+    'yellow' : '\x1b[33m',
+    'blue' : '\x1b[94m',    
+    'green' : '\x1b[32m',
+    'end' : '\033[0m'
 }
 
 # progress bar without tqdm :P
-def progress_bar(progress = 0, status = "", bar_len = 20):
+def progress_bar(progress = 0, status = '', bar_len = 20):
     status = status.ljust(30)
     if progress == 1:
-        status = "{}".format("Done...".ljust(30))
+        status = '{}'.format('Done...'.ljust(30))
     block = int(round(bar_len*progress))
-    text = "\rProgress: [{}] {}% {}".format(COLORS['green'] + "#"*block + COLORS['end'] + "-"*(bar_len-block), round(progress*100,2), status)
-    print(text, end="")
+    text = '\rProgress: [{}] {}% {}'.format(COLORS['green'] + '#'*block + COLORS['end'] + '-'*(bar_len-block), round(progress*100,2), status)
+    print(text, end='')
 
 class AverageMeter:
     def __init__(self):
@@ -42,13 +42,13 @@ class AverageMeter:
                 if key in self.metrics:
                     self.metrics[key].append(value)
                 else:
-                    raise ValueError("Incorrect metric key")
+                    raise ValueError('Incorrect metric key')
     def return_metrics(self):
         metrics = {key: np.mean(values) for key, values in self.metrics.items()}
         return metrics
     def return_msg(self):
         metrics = self.return_metrics()
-        msg = "".join([f"{key}: {round(value, 3)} " for key, value in metrics.items()])
+        msg = ''.join([f'{key}: {round(value, 3)} ' for key, value in metrics.items()])
         return msg       
 
 class Logger:
@@ -60,40 +60,40 @@ class Logger:
             handlers=[logging.FileHandler(os.path.join(output_dir, 'trainlogs.txt'))]
         )
         
-    def print(self, msg, mode=""):
-        if mode == "info":
-            print(f"{COLORS['yellow']}[INFO] {msg}{COLORS['end']}")
-        elif mode == "train":
-            print(f"\n{COLORS['blue']}[TRAIN] {msg}{COLORS['end']}")
-        elif mode == "val":
-            print(f"\n{COLORS['green']}[VAL] {msg}{COLORS['end']}")
+    def print(self, msg, mode=''):
+        if mode == 'info':
+            print(f'{COLORS["yellow"]}[INFO] {msg}{COLORS["end"]}')
+        elif mode == 'train':
+            print(f'\n{COLORS["blue"]}[TRAIN] {msg}{COLORS["end"]}')
+        elif mode == 'val':
+            print(f'\n{COLORS["green"]}[VAL] {msg}{COLORS["end"]}')
         else:
-            print(f"{msg}")
+            print(f'{msg}')
     
-    def write(self, msg, mode=""):
-        if mode == "info":
-            msg = f"[INFO] {msg}"
-        elif mode == "train":
-            msg = f"[TRAIN] {msg}"
-        elif mode == "val":
-            msg = f"[VAL] {msg}"
+    def write(self, msg, mode=''):
+        if mode == 'info':
+            msg = f'[INFO] {msg}'
+        elif mode == 'train':
+            msg = f'[TRAIN] {msg}'
+        elif mode == 'val':
+            msg = f'[VAL] {msg}'
         else:
-            msg = f"{msg}"
+            msg = f'{msg}'
         logging.info(msg)
 
 def open_config(file_path):
-    """
+    '''
     Opens a configuration file.
-    """
+    '''
     config = yaml.safe_load(open(file_path, 'r'))
     return config
 
 
 def init_experiment(args, seed=420):
-    """
+    '''
     Instantiates output directories, logging files
     and random seeds.
-    """
+    '''
     # Set seeds
     random.seed(seed)
     np.random.seed(seed)
@@ -110,12 +110,12 @@ def init_experiment(args, seed=420):
     config = open_config(args['config'])
 
     # Setup logging directory
-    output_dir = os.path.join(config["dataset"], config["task"], args["output"])
+    output_dir = os.path.join(config['dataset'], config['task'], args['output'])
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
     logger = Logger(output_dir)
     
-    logger.print('Logging at {}'.format(output_dir), mode="info")
+    logger.print('Logging at {}'.format(output_dir), mode='info')
     logger.print('-'*50)
     logger.print('{:>25}'.format('Configuration'))
     logger.print('-'*50)
@@ -128,14 +128,14 @@ def init_experiment(args, seed=420):
     
     # setup device
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    logger.print(f"Found device {torch.cuda.get_device_name(0)}", mode="info")
+    logger.print(f'Found device {torch.cuda.get_device_name(0)}', mode='info')
 
     return config, output_dir, logger, device
 
 def print_network(model, name=''):
-    """
+    '''
     Pretty prints the model.
-    """
+    '''
     print(name.rjust(35))
     print('-'*70)
     print('{:>25} {:>27} {:>15}'.format('Layer.Parameter', 'Shape', 'Param'))
