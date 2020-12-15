@@ -72,11 +72,9 @@ dataloaders:
 # Networks
 encoder:
   name: resnet18
-  pretrained: False
   zero_init_residual: False 
 
 proj_head:
-  in_dim: 512
   out_dim: 128
 
 # Optimizers

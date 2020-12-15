@@ -294,7 +294,7 @@ class ClusteringModel:
         ''' Computes metrics to assess quality of clustering '''
         
         total_loss = common.AverageMeter()
-        pred, gt = [], []
+        probs, gt = [], []
 
         for indx, data in enumerate(val_loader):
             anchor, neighbor = data['anchor'].to(self.device), data['neighbor'].to(self.device)
@@ -303,8 +303,8 @@ class ClusteringModel:
                 a_out = self.cluster_head(self.encoder(anchor))
                 n_out = self.cluster_head(self.encoder(neighbor))
 
-            pred.extend(np.concatenate([o.argmax(dim=1).unsqueeze(1).detach().cpu().numpy() for o in a_out], axis=1))
-            gt.extend(data['target'].numpy())
+            probs.append(torch.cat([o.unsqueeze(0).detach().cpu() for o in a_out], dim=0))
+            gt.extend(data['target'])
 
             # Compute all losses and collect
             for i, (a, n) in enumerate(zip(a_out, n_out)):
@@ -316,26 +316,16 @@ class ClusteringModel:
         total_loss = total_loss.return_metrics()
         self.best_head_indx = np.argmin(list(total_loss.values()))
         
-        # Hungarian matching accuracy for best head
-        pred = np.array(pred)[:, self.best_head_indx]
-        gt = np.array(gt)
-        cls_map = eval_utils.hungarian_match(pred, gt, len(np.unique(pred)), len(np.unique(gt)))
+        # eval
+        probs = torch.cat(probs, dim=1)[self.best_head_indx]
+        gt = torch.tensor(gt)
+        cluster_score = eval_utils.eval_clusters(probs, gt)
         
-        remapped_pred = np.zeros(len(pred))
-        for pred_c, target_c in cls_map:
-            remapped_pred[pred == int(pred_c)] = int(target_c)
-
-        acc = {}
-        for i in np.unique(remapped_pred):
-            indx = remapped_pred == i
-            acc[f'cls {i} acc'] = (remapped_pred[indx] == gt[indx]).sum()/len(remapped_pred[indx])
-        acc['acc'] = np.mean(list(acc.values()))
-        
-        if acc['acc'] >= self.best:
+        if cluster_score['acc'] >= self.best:
             self.save_model('best.pth')
-            self.best = acc
-        
-        return {**acc}
+            self.best = cluster_score['acc']
+
+        return {**cluster_score}
 
 # =============================================================================================
 # Self labelling model for SCAN
@@ -420,33 +410,23 @@ class SelfLabel:
     def validate(self, val_loader):
         ''' Assesses prediction quality '''
 
-        pred, gt = [], []
+        probs, gt = [], []
         for indx, data in enumerate(val_loader):
             img = data['img'].to(self.device)
             with torch.no_grad():
                 out = self.cluster_head(self.encoder(img))[0]
             
-            pred.extend(out.argmax(dim=1).cpu().detach().numpy())
-            gt.extend(data['target'].numpy())
+            probs.extend(out.cpu().detach())
+            gt.extend(data['target'])
             common.progress_bar(progress=indx/len(val_loader))
         common.progress_bar(progress=1)
 
-        pred, gt = np.array(pred), np.array(gt)
-        cls_map = eval_utils.hungarian_match(pred, gt, len(np.unique(pred)), len(np.unique(gt)))
-
-        remapped_pred = np.zeros(len(pred))
-        for pred_c, target_c in cls_map:
-            remapped_pred[pred == int(pred_c)] = int(target_c)
-
-        acc = {}
-        for i in np.unique(remapped_pred):
-            indx = remapped_pred == i
-            acc[f'cls {i} acc'] = (remapped_pred[indx] == gt[indx]).sum()/len(remapped_pred[indx])
-        acc['acc'] = np.mean(list(acc.values()))
+        probs, gt = torch.tensor(probs), torch.tensor(gt)
+        cluster_score = eval_utils.eval_clusters(probs, gt)
         
-        if acc['acc'] >= self.best:
+        if cluster_score['acc'] >= self.best:
             self.save_model('best.pth')
-            self.best = acc
+            self.best = cluster_score['acc']
 
-        return {**acc}
+        return {**cluster_score}
 
