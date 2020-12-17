@@ -19,7 +19,6 @@ BACKBONES = {
     'resnet101': {'net': models.resnet101, 'dim': 2048}
 }
 
-
 class Encoder(nn.Module):
 
     def __init__(self, name='resnet18', zero_init_residual=False):
@@ -101,4 +100,21 @@ class ClusteringHead(nn.Module):
 
     def forward(self, x):
         return [w(x) for w in self.W]
+
+
+class RotnetClassifier(nn.Module):
+
+    def __init__(self, in_dim=512, n_angles=4):
+        super(RotnetClassifier, self).__init__()
+        self.W1 = nn.Linear(in_dim, in_dim, bias=False)
+        self.BN1 = nn.BatchNorm1d(in_dim)
+        self.relu = nn.ReLU()
+        self.W2 = nn.Linear(in_dim, n_angles)
+
+    def forward(self, x):
+        out = self.W2(self.relu(self.BN1(self.W1(x))))
+        out = F.log_softmax(out, dim=-1)
+        return out
+
+
 

@@ -28,6 +28,8 @@ def get_scheduler(config, optimizer):
     if name is not None:
         if name == 'cosine':
             scheduler = lr_scheduler.CosineAnnealingLR(optimizer, config['epochs']-warmup_epochs, eta_min=0.0, last_epoch=-1)
+        elif name == 'multistep':
+            scheduler = lr_scheduler.MultiStepLR(optimizer, config['milestones'], config['gamma'])
         else:
             raise NotImplementedError(f'Invalid scheduler {name}')
         return scheduler, warmup_epochs

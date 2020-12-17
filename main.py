@@ -19,6 +19,7 @@ MODEL_HELPER = {
     'simclr': models.SimCLR,
     'cluster': models.ClusteringModel,
     'selflabel': models.SelfLabel,
+    'rotnet': models.RotNet
 }
 
 # ===================================================================================================
@@ -47,6 +48,7 @@ class Trainer:
                     img_dataset=dataset, 
                     neighbor_indices=params['neighbor_indices'])
             
+            collate_fn = datasets.RotNetCollate(params['rotnet']) if 'rotnet' in list(params.keys()) else None
             shuffle = params.get('shuffle', False)
             weigh = params.get('weigh', False)
             drop_last = params.get('drop_last', False)
@@ -56,7 +58,8 @@ class Trainer:
                 num_workers=self.config['num_workers'], 
                 shuffle=shuffle, 
                 weigh=weigh,
-                drop_last=drop_last
+                drop_last=drop_last,
+                collate_fn=collate_fn
             )
         
         assert self.config['task'] in MODEL_HELPER.keys(), 'Invalid task, choose from simclr, cluster, selflabel'
@@ -106,16 +109,17 @@ class Trainer:
                 self.logger.write(msg, mode='val')
                 
                 self.model.save_model(f'{epoch}.pth')
+            break
         
         self.logger.print('Training complete', mode='info')
         self.logger.write('Training complete', mode='info')
         
-        if self.config['task'] == 'simclr':
+        if self.config['task'] in ['simclr', 'rotnet']:
             self.logger.print('Linear eval', mode='info')
             self.logger.write('Linear eval', mode='info')
             
             metrics = self.model.linear_eval(train_loader=self.data_loaders['eval_train'], val_loader=self.data_loaders['val'])
-            msg = f'Linear eval acc: {metrics["linear eval acc"]}'
+            msg = f'Linear eval acc: {round(metrics["linear eval acc"], 3)}'
             self.logger.print(msg, mode='val')
             self.logger.write(msg, mode='val')
             

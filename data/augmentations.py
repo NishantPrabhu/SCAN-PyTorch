@@ -23,7 +23,6 @@ class GaussianBlur:
         img = img.filter(ImageFilter.GaussianBlur(radius=sigma))
         return img
 
-
 class Cutout:
 
     def __init__(self, n_cuts=0, max_len=1):
@@ -116,7 +115,6 @@ class RandomAugment:
             else:
                 raise NotImplementedError(f"{aug} not implemented")
         return img
-
 
 # Transformation helper
 TRANSFORM_HELPER = {

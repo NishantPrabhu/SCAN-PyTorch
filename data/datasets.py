@@ -12,6 +12,7 @@ import numpy as np
 from PIL import Image
 from torchvision import datasets 
 from torch.utils.data import DataLoader, WeightedRandomSampler
+import torch.nn.functional as F
 
 
 DATASET_HELPER = {
@@ -82,13 +83,42 @@ class NeighborDataset:
     def __len__(self):
         return len(self.img_dataset)
 
+class RotNetCollate:
+    def __init__(self, rotate_angles):
+        self.rot_matrices = []
+        for angle in rotate_angles:
+            angle = torch.tensor(angle/180*np.pi)
+            self.rot_matrices.append(
+                torch.tensor([[torch.cos(angle), -torch.sin(angle), 0], [torch.sin(angle), torch.cos(angle), 0]])
+            )
+    
+    def rot_img(self, x, rot_matrix):
+        rot_mat = rot_matrix[None, ...].repeat(x.shape[0], 1, 1)
+        grid = F.affine_grid(rot_mat, x.size(), align_corners=True)
+        x = F.grid_sample(x, grid, align_corners=True)
+        return x
 
-def get_dataloader(dataset, batch_size, num_workers=1, shuffle=False, weigh=False, drop_last=False):
+    def __call__(self, batch):
+        assert "img" in batch[0].keys()
+        imgs = torch.cat([b["img"].unsqueeze(0) for b in batch], axis=0)
+        labels = torch.zeros(len(imgs)*len(self.rot_matrices))
+        batch = []
+        for i in range(len(self.rot_matrices)):
+            labels[i*len(imgs):(i+1)*len(imgs)] = i
+            batch.append(self.rot_img(imgs, self.rot_matrices[i]))
+        # get tensors and shuffle
+        imgs = torch.cat(batch, axis=0)
+        labels = labels.long()
+        shuffle_indices = torch.randperm(imgs.size()[0])
+        data = {"img": imgs[shuffle_indices], "target": labels[shuffle_indices]}
+        return data
+
+def get_dataloader(dataset, batch_size, num_workers=1, shuffle=False, weigh=False, drop_last=False, collate_fn=None):
     """ Returns a DataLoader with specified configuration """
-
+    
     if weigh:
         weights = sample_weights(dataset.targets)
         sampler = WeightedRandomSampler(weights, len(weights), replacement=True)
-        return DataLoader(dataset, batch_size=batch_size, num_workers=num_workers, sampler=sampler, drop_last=drop_last)
+        return DataLoader(dataset, batch_size=batch_size, num_workers=num_workers, sampler=sampler, drop_last=drop_last, collate_fn=collate_fn)
     else:
-        return DataLoader(dataset, batch_size=batch_size, num_workers=num_workers, shuffle=shuffle, drop_last=drop_last)
+        return DataLoader(dataset, batch_size=batch_size, num_workers=num_workers, shuffle=shuffle, drop_last=drop_last, collate_fn=collate_fn)
