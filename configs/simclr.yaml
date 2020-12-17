@@ -1,0 +1,104 @@
+
+# SimCLR configuration
+# Authors: Mukund Varma T, Nishant Prabhu
+
+# General
+task: simclr
+dataset: cifar100
+batch_size: 100
+num_workers: 4
+epochs: 1000
+eval_every: 100
+
+# number of neighbors
+n_neighbors: 20
+
+# Data Transforms
+aug_transform:
+  color_jitter:
+    brightness: 0.4
+    contrast: 0.4
+    saturation: 0.4
+    hue: 0.1
+    apply_prob: 0.8
+  random_gray:
+    p: 0.2
+  gaussian_blur:
+    sigma: [0.1, 2.0]  
+    apply_prob: 0.5
+  random_resized_crop: 
+    size: [32, 32]
+    scale: [0.08, 1.0]
+  random_flip:
+  to_tensor:
+  normalize:
+    mean: [0.5071, 0.4867, 0.4408]
+    std: [0.2675, 0.2565, 0.2761]
+
+std_transform:
+  center_crop: 
+    size: [32, 32]
+  to_tensor:
+  normalize:
+    mean: [0.5071, 0.4867, 0.4408]
+    std: [0.2675, 0.2565, 0.2761]
+
+# Data Loaders
+dataloaders:
+  train:
+    split: train
+    transforms: 
+      i: aug_transform
+      j: aug_transform
+    return_items: [i, j]
+    shuffle: True
+    drop_last: True
+    weigh: True
+  val:
+    split: val
+    transforms: 
+      img: std_transform
+    return_items: [img, target]
+    shuffle: False
+    drop_last: False
+    collate: False
+  eval_train:
+    split: train
+    transforms: 
+      img: std_transform
+    return_items: [img, target]
+    shuffle: False
+    drop_last: False
+
+# Networks
+encoder:
+  name: resnet50
+  zero_init_residual: False 
+
+proj_head:
+  out_dim: 128
+
+# Optimizers
+simclr_optim:
+  name: sgd
+  lr: 1.0
+  weight_decay: 1.e-06
+
+simclr_lr_scheduler:
+  name: cosine
+  warmup_epochs: 10
+
+simclr_criterion:
+  normalize: False
+  temperature: 0.5
+
+# Linear classifier
+linear_eval_epochs: 100
+
+clf_optim:
+  name: sgd
+  lr: 0.1
+  weight_decay: 0.0
+
+clf_lr_scheduler:
+  name: cosine

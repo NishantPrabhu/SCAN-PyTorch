@@ -1,0 +1,96 @@
+
+# SimCLR configuration
+# Authors: Mukund Varma T, Nishant Prabhu
+
+# General
+task: rotnet
+dataset: cifar10
+batch_size: 32
+num_workers: 4
+epochs: 100
+eval_every: 5
+
+# Data Transforms
+train_transform:
+  color_jitter:
+    brightness: 0.4
+    contrast: 0.4
+    saturation: 0.4
+    hue: 0.1
+    apply_prob: 0.8
+  random_gray:
+    p: 0.2
+  gaussian_blur:
+    sigma: [0.1, 2.0]  
+    apply_prob: 0.5
+  random_resized_crop: 
+    size: [32, 32]
+    scale: [0.2, 1.0]
+  to_tensor:
+  normalize:
+    mean: [0.4914, 0.4822, 0.4465]
+    std:  [0.2023, 0.1994, 0.2010]
+
+val_transform:
+  center_crop: 
+    size: [32, 32]
+  to_tensor:
+  normalize:
+    mean: [0.4914, 0.4822, 0.4465]
+    std:  [0.2023, 0.1994, 0.2010]
+
+# Data Loaders
+dataloaders:
+  train:
+    split: train
+    transforms: 
+      img: train_transform
+    return_items: [img, target]
+    shuffle: True
+    drop_last: True
+    weigh: False
+    collate: True
+    rotnet: True
+
+  val:
+    split: val
+    transforms: 
+      img: val_transform
+    return_items: [img, target]
+    shuffle: False
+    drop_last: False
+    collate: True
+    rotnet: True
+
+  eval_train:
+    split: train
+    transforms: 
+      img: val_transform
+    return_items: [img, target]
+    shuffle: False
+    drop_last: False
+    collate: True
+
+
+# Networks
+encoder:
+  name: resnet18
+  zero_init_residual: False 
+
+# Optimizers
+rotnet_optim:
+  name: sgd
+  lr: 1.0
+  weight_decay: 5.e-04 
+
+
+# Linear classifier
+linear_eval_epochs: 100
+
+clf_optim:
+  name: sgd
+  lr: 0.1
+  weight_decay: 0.0
+
+clf_lr_scheduler:
+  name: cosine

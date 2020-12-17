@@ -1,0 +1,73 @@
+# Clustering configuration
+# Authors: Mukund Varma T, Nishant Prabhu
+
+# General
+task: cluster
+dataset: cifar10
+batch_size: 128
+num_workers: 4
+epochs: 50
+eval_every: 5
+simclr_save: cifar10/simclr/test/best.pth
+
+# Data Transforms
+aug_transform:
+  random_flip:
+  random_crop: 
+    size: [32, 32]
+  rand_aug:
+    n_aug: 4
+  to_tensor:
+  normalize:
+    mean: [0.4914, 0.4822, 0.4465]
+    std:  [0.2023, 0.1994, 0.2010]
+  cutout:
+    n_cuts: 1
+    max_len: 16
+
+std_transform:
+  center_crop: 
+    size: [32, 32]
+  to_tensor:
+  normalize:
+    mean: [0.4914, 0.4822, 0.4465]
+    std:  [0.2023, 0.1994, 0.2010]
+
+# Data Loaders
+dataloaders:
+  train:
+    split: train
+    transforms: 
+      img: aug_transform
+    return_items: [img]
+    shuffle: True
+    neighbor_indices: cifar10/simclr/test/train_neighbors.npy
+  val:
+    split: val
+    transforms: 
+      img: std_transform
+    return_items: [img, target]
+    shuffle: False
+    neighbor_indices: cifar10/simclr/test/val_neighbors.npy
+
+# Networks
+encoder:
+  name: resnet18
+  zero_init_residual: False 
+
+cluster_head:
+  n_clusters: 10
+  heads: 1
+
+# Optimizers
+cluster_optim:
+  name: adam
+  lr: 1.e-04
+  weight_decay: 1.e-04
+
+cluster_lr_scheduler:
+  name: NULL
+  warmup_epochs: 0
+
+cluster_criterion:
+  entropy_weight: 5.0
