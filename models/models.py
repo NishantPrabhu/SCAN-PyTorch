@@ -159,7 +159,7 @@ class SimCLR:
                 # Accuracy
                 pred = out.argmax(dim=1).cpu()
                 correct = pred.eq(target.view_as(pred)).sum().item()
-                train_metrics.add({'train acc': correct/len(batch), 'train loss': loss.item()})
+                train_metrics.add({'train acc': correct/len(pred), 'train loss': loss.item()})
 
             # Validation
             clf_head.eval()
@@ -175,7 +175,7 @@ class SimCLR:
                 # Accuracy
                 pred = out.argmax(dim=1)
                 correct = pred.eq(target.view_as(pred)).sum().item()
-                val_metrics.add({'val acc': correct/len(batch), 'val loss': loss.item()})
+                val_metrics.add({'val acc': correct/len(pred), 'val loss': loss.item()})
 
             train_log = train_metrics.return_msg()
             val_log = val_metrics.return_msg()

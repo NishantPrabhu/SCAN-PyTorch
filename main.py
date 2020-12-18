@@ -93,7 +93,7 @@ class Trainer:
             wandb.log({'lr': self.model.optim.param_groups[0]['lr'], 'train epoch': epoch})
             if epoch <= self.model.warmup_epochs:
                 self.model.optim.param_groups[0]['lr'] = epoch/self.model.warmup_epochs * self.model.lr
-            if self.model.lr_scheduler is not None:
+            elif self.model.lr_scheduler is not None:
                 self.model.lr_scheduler.step()
             self.model.save_ckpt(epoch)
             
