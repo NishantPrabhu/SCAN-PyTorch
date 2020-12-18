@@ -13,28 +13,24 @@ n_neighbors: 20
 
 # Data Transforms
 train_transform:
-  random_resized_crop: 
+  random_resized_crop:
     size: [32, 32]
     scale: [0.2, 1.0]
   to_tensor:
   normalize:
-    mean: [0.4914, 0.4822, 0.4465]
-    std:  [0.2023, 0.1994, 0.2010]
 
 std_transform:
-  center_crop: 
+  center_crop:
     size: [32, 32]
   to_tensor:
   normalize:
-    mean: [0.4914, 0.4822, 0.4465]
-    std:  [0.2023, 0.1994, 0.2010]
 
 # Data Loaders
 dataloaders:
   train:
     rotnet: [0, 90, 180, 270]
     split: train
-    transforms: 
+    transforms:
       img: train_transform
     return_items: [img]
     shuffle: True
@@ -42,14 +38,14 @@ dataloaders:
     weigh: True
   val:
     split: val
-    transforms: 
+    transforms:
       img: std_transform
     return_items: [img, target]
     shuffle: False
     drop_last: False
   eval_train:
     split: train
-    transforms: 
+    transforms:
       img: std_transform
     return_items: [img, target]
     shuffle: False
@@ -58,7 +54,7 @@ dataloaders:
 # Networks
 encoder:
   name: resnet18
-  zero_init_residual: False 
+  zero_init_residual: False
 
 rotnet:
   n_angles: 4
@@ -67,7 +63,7 @@ rotnet:
 rotnet_optim:
   name: sgd
   lr: 0.1
-  weight_decay: 5.e-04 
+  weight_decay: 5.e-04
 
 rotnet_lr_scheduler:
   name: multistep

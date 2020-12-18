@@ -22,4 +22,3 @@ python3 main.py -c configs/cluster.yaml -o <path-to-output> (default: ./dataset/
 # self label
 python3 main.py -c configs/selflabel.yaml -o <path-to-output> (default: ./dataset/selflabel/run-date-time)
 ```
-

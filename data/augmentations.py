@@ -1,4 +1,3 @@
-
 """
 Augmentation pipelines and functions to generate them.
 
@@ -7,27 +6,26 @@ Authors: Mukund Varma T, Nishant Prabhu
 
 # Dependencies
 from PIL import Image, ImageFilter, ImageOps, ImageEnhance, ImageDraw
-from torchvision import transforms 
+from torchvision import transforms
 import numpy as np
-import random 
-import torch 
+import random
+import torch
 
 
 class GaussianBlur:
-
     def __init__(self, sigma=[0.1, 2.0]):
-        self.sigma = sigma 
+        self.sigma = sigma
 
     def __call__(self, img):
         sigma = random.uniform(self.sigma[0], self.sigma[1])
         img = img.filter(ImageFilter.GaussianBlur(radius=sigma))
         return img
 
-class Cutout:
 
+class Cutout:
     def __init__(self, n_cuts=0, max_len=1):
         self.n_cuts = n_cuts
-        self.max_len = max_len 
+        self.max_len = max_len
 
     def __call__(self, img):
         h, w = img.shape[1:3]
@@ -36,10 +34,10 @@ class Cutout:
 
         for _ in range(self.n_cuts):
             x, y = random.randint(0, w), random.randint(0, h)
-            x1 = np.clip(x-cut_len//2, 0, w)
-            x2 = np.clip(x+cut_len//2, 0, w)
-            y1 = np.clip(y-cut_len//2, 0, h)
-            y2 = np.clip(y+cut_len//2, 0, h)
+            x1 = np.clip(x - cut_len // 2, 0, w)
+            x2 = np.clip(x + cut_len // 2, 0, w)
+            y1 = np.clip(y - cut_len // 2, 0, h)
+            y2 = np.clip(y + cut_len // 2, 0, h)
             mask[y1:y2, x1:x2] = 0
 
         mask = torch.from_numpy(mask)
@@ -48,7 +46,6 @@ class Cutout:
 
 
 class RandomAugment:
-
     def __init__(self, n_aug=4):
         self.n_aug = n_aug
         self.aug_list = [
@@ -65,7 +62,7 @@ class RandomAugment:
             ("shear_y", -0.1, 0.1),
             ("translate_x", -0.1, 0.1),
             ("translate_y", -0.1, 0.1),
-            ("posterize", 1, 1)
+            ("posterize", 1, 1),
         ]
 
     def __call__(self, img):
@@ -116,6 +113,7 @@ class RandomAugment:
                 raise NotImplementedError(f"{aug} not implemented")
         return img
 
+
 # Transformation helper
 TRANSFORM_HELPER = {
     "gaussian_blur": GaussianBlur,
@@ -132,13 +130,16 @@ TRANSFORM_HELPER = {
     "cutout": Cutout,
 }
 
-def get_transform(config):
+
+def get_transform(config, db_norm):
     """
-    Generates a torchvision.transforms.Compose pipeline 
+    Generates a torchvision.transforms.Compose pipeline
     based on given configurations.
     """
+    if config["normalize"] is None:
+        config["normalize"] = db_norm
     transform = []
-    
+
     # Obtain transforms from config in sequence
     for key, value in config.items():
         if value is not None:
@@ -150,4 +151,3 @@ def get_transform(config):
             tr = TRANSFORM_HELPER[key]()
         transform.append(tr)
     return transforms.Compose(transform)
-
