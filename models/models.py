@@ -352,7 +352,6 @@ class RotNet:
 
             if clf_scheduler is not None:
                 clf_scheduler.step()
-            break
 
         return {"linear eval acc": best}
 

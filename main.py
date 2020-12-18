@@ -112,7 +112,6 @@ class Trainer:
                 self.logger.write(msg, mode="val")
 
                 self.model.save_model(f"{epoch}.pth")
-            break
 
         self.logger.print("Training complete", mode="info")
         self.logger.write("Training complete", mode="info")
