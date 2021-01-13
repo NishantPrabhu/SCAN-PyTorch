@@ -8,7 +8,7 @@ batch_size: 1000
 num_workers: 4
 epochs: 200
 eval_every: 5
-cluster_save:
+cluster_save: cifar10/cluster/resnet18-noblur-128/best.pth
 
 # Data Transforms
 aug_transform:

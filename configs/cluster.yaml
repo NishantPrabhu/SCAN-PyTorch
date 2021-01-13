@@ -8,7 +8,7 @@ batch_size: 128
 num_workers: 4
 epochs: 50
 eval_every: 5
-simclr_save:
+simclr_save: cifar10/simclr/resnet18-noblur-128/best.pth
 
 # Data Transforms
 aug_transform:
@@ -37,14 +37,14 @@ dataloaders:
       img: aug_transform
     return_items: [img]
     shuffle: True
-    neighbor_indices:
+    neighbor_indices: cifar10/simclr/resnet18-noblur-128/train_neighbors.npy
   val:
     split: val
     transforms:
       img: std_transform
     return_items: [img, target]
     shuffle: False
-    neighbor_indices:
+    neighbor_indices: cifar10/simclr/resnet18-noblur-128/val_neighbors.npy
 
 # Networks
 encoder:

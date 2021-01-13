@@ -80,7 +80,7 @@ class ClusterLoss(nn.Module):
         consistency_loss = F.binary_cross_entropy(similarity, torch.ones_like(similarity))
 
         # Entropy
-        p = torch.clamp(torch.mean(anchor_probs, dim=0), min=1e-10)
+        p = torch.clamp(torch.mean(anchor_probs, dim=0), min=1e-8)
         entropy_loss = -(p * torch.log(p)).sum()
 
         # Combine loss

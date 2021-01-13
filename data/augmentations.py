@@ -49,20 +49,20 @@ class RandomAugment:
     def __init__(self, n_aug=4):
         self.n_aug = n_aug
         self.aug_list = [
-            ("identity", 1, 1),
-            ("autocontrast", 1, 1),
-            ("equalize", 1, 1),
+            ("identity", 0, 1),
+            ("autocontrast", 0, 1),
+            ("equalize", 0, 1),
             ("rotate", -30, 30),
-            ("solarize", 1, 1),
-            ("color", 1, 1),
-            ("contrast", 1, 1),
-            ("brightness", 1, 1),
-            ("sharpness", 1, 1),
+            ("solarize", 0, 256),
+            ("color", 0.05, 0.95),
+            ("contrast", 0.05, 0.95),
+            ("brightness", 0.05, 0.95),
+            ("sharpness", 0.05, 0.95),
             ("shear_x", -0.1, 0.1),
             ("shear_y", -0.1, 0.1),
             ("translate_x", -0.1, 0.1),
             ("translate_y", -0.1, 0.1),
-            ("posterize", 1, 1),
+            ("posterize", 4, 8),
         ]
 
     def __call__(self, img):
