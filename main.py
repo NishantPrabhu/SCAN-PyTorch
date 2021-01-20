@@ -32,13 +32,17 @@ class Trainer:
         # Initialize experiment
         self.config, output_dir, self.logger, device = common.init_experiment(args, seed=420)
 
+        # check if dataset and method is implemented
+        assert (
+            self.config["dataset"] in datasets.DATASET_HELPER.keys()
+        ), f"Invalid dataset name, choose from {list(datasets.DATASET_HELPER.keys())}"
+        assert self.config["task"] in MODEL_HELPER.keys(), f"Invalid task name, choose from {list(MODEL_HELPER.keys())}"
+
         # get datasets and transforms
         self.data_loaders = {}
         for key, params in self.config["dataloaders"].items():
             transforms = {
-                key: augmentations.get_transform(
-                    self.config[value], datasets.DATASET_HELPER[self.config["dataset"]]["norm"]
-                )
+                key: augmentations.get_transform(self.config[value], dataset=self.config["dataset"])
                 for key, value in params["transforms"].items()
             }
             dataset = datasets.get_dataset(
@@ -49,9 +53,14 @@ class Trainer:
                 return_items=params["return_items"],
             )
             if "neighbor_indices" in list(params.keys()):
-                dataset = datasets.NeighborDataset(img_dataset=dataset, neighbor_indices=params["neighbor_indices"])
+                dataset = datasets.NeighborDataset(input_dataset=dataset, neighbor_indices=params["neighbor_indices"])
 
-            collate_fn = datasets.RotNetCollate(params["rotnet"]) if "rotnet" in list(params.keys()) else None
+            if "rotnet" in list(params.keys()):
+                collate_fn = datasets.RotNetCollate(params["rotnet"])
+            elif self.config["dataset"] in ["sst1", "sst2"]:
+                collate_fn = datasets.SentPadCollate(pad_indx=0, return_items=dataset.return_items)
+            else:
+                collate_fn = None
             shuffle = params.get("shuffle", False)
             weigh = params.get("weigh", False)
             drop_last = params.get("drop_last", False)
@@ -65,7 +74,6 @@ class Trainer:
                 collate_fn=collate_fn,
             )
 
-        assert self.config["task"] in MODEL_HELPER.keys(), "Invalid task, choose from simclr, cluster, selflabel"
         self.model = MODEL_HELPER[self.config["task"]](config=self.config, device=device, output_dir=output_dir)
 
         if os.path.exists(os.path.join(output_dir, "last.ckpt")):

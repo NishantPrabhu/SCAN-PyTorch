@@ -1,0 +1,87 @@
+
+# SimCLR configuration
+# Authors: Mukund Varma T, Nishant Prabhu
+
+# General
+task: simclr
+dataset: sst1
+batch_size: 256
+num_workers: 0
+epochs: 150
+eval_every: 10
+# number of neighbors
+n_neighbors: 20
+
+# Data Transforms
+aug_transform:
+  synonym_replace:
+    ratio: 0.1
+  random_delete:
+    keep_ratio: 0.9
+  random_swap:
+    ratio: 0.1
+  random_insert:
+    ratio: 0.1
+
+std_transform:
+  identity:
+
+# Data Loaders
+dataloaders:
+  train:
+    split: train
+    transforms:
+      i: aug_transform
+      j: aug_transform
+    return_items: [i, j]
+    shuffle: True
+    drop_last: True
+    weigh: True
+  val:
+    split: val
+    transforms:
+      input: std_transform
+    return_items: [input, target]
+    shuffle: False
+    drop_last: False
+  eval_train:
+    split: train
+    transforms:
+      input: std_transform
+    return_items: [input, target]
+    shuffle: False
+    drop_last: False
+
+
+# Networks
+encoder:
+  fmaps: 100
+  strides: [3, 4, 5]
+
+proj_head:
+  out_dim: 128
+
+# Optimizers
+simclr_optim:
+  name: sgd
+  lr: 0.1
+  weight_decay: 1.e-04
+
+simclr_lr_scheduler:
+  name: cosine
+  warmup_epochs: 10
+
+simclr_criterion:
+  normalize: False
+  temperature: 0.5
+
+# Linear classifier
+linear_eval_epochs: 100
+
+clf_optim:
+  name: sgd
+  lr: 0.1
+  weight_decay: 0.0
+
+clf_lr_scheduler:
+  name: cosine

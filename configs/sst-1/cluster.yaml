@@ -1,0 +1,58 @@
+# Clustering configuration
+# Authors: Mukund Varma T, Nishant Prabhu
+
+# General
+task: cluster
+dataset: sst1
+batch_size: 128
+num_workers: 4
+epochs: 50
+eval_every: 5
+simclr_save: sst1/simclr/test/best.pth
+
+# Data Transforms
+aug_transform:
+  rand_sent_aug:
+    n_aug: 4
+
+std_transform:
+  identity:
+
+# Data Loaders
+dataloaders:
+  train:
+    split: train
+    transforms:
+      input: aug_transform
+    return_items: [input]
+    shuffle: True
+    neighbor_indices: sst1/simclr/test/train_neighbors.npy
+  val:
+    split: val
+    transforms:
+      input: std_transform
+    return_items: [input, target]
+    shuffle: False
+    neighbor_indices: sst1/simclr/test/val_neighbors.npy
+
+# Networks
+encoder:
+  fmaps: 100
+  strides: [3, 4, 5]
+
+cluster_head:
+  n_clusters: 5
+  heads: 1
+
+# Optimizers
+cluster_optim:
+  name: adam
+  lr: 1.e-04
+  weight_decay: 1.e-04
+
+cluster_lr_scheduler:
+  name: NULL
+  warmup_epochs: 0
+
+cluster_criterion:
+  entropy_weight: 10.0

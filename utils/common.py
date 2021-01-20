@@ -98,14 +98,14 @@ def init_experiment(args, seed=420):
     Instantiates output directories, logging files
     and random seeds.
     """
-    # Set seeds
+    # set seeds
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
     torch.cuda.manual_seed(seed)
     torch.cuda.manual_seed_all(seed)
 
-    # Some other stuff
+    # some other stuff
     torch.backends.cudnn.enabled = True
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
@@ -113,7 +113,7 @@ def init_experiment(args, seed=420):
     # open config
     config = open_config(args["config"])
 
-    # Setup logging directory
+    # setup logging directory
     output_dir = os.path.join(config["dataset"], config["task"], args["output"])
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)

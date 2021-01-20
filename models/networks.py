@@ -112,3 +112,20 @@ class RotnetClassifier(nn.Module):
         out = self.W2(self.relu(self.BN1(self.W1(x))))
         out = F.log_softmax(out, dim=-1)
         return out
+
+
+class KimCNN(nn.Module):
+    def __init__(self, fmaps, strides, pretrained_embed):
+        super(KimCNN, self).__init__()
+        vocab_size, emb_dim = pretrained_embed.shape
+        self.embedding = nn.Embedding(vocab_size, emb_dim).from_pretrained(pretrained_embed, freeze=True)
+        conv_layers = [nn.Conv2d(1, fmaps, (stride, emb_dim), padding=(stride - 1, 0)) for stride in strides]
+        self.conv_layers = nn.Sequential(*conv_layers)
+        self.backbone_dim = fmaps * len(self.conv_layers)
+
+    def forward(self, x):
+        x = self.embedding(x).unsqueeze(1)
+        x = [F.relu(conv(x)).squeeze(3) for conv in self.conv_layers]
+        x = [F.max_pool1d(c, c.size(2)).squeeze(2) for c in x]
+        x = torch.cat(x, 1)
+        return x

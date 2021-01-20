@@ -26,7 +26,12 @@ class SimCLR:
         self.output_dir = output_dir
 
         # Models
-        self.encoder = networks.Encoder(**config["encoder"]).to(self.device)
+        if self.config["dataset"] in ["cifar10", "cifar100"]:
+            self.encoder = networks.Encoder(**config["encoder"]).to(self.device)
+        else:
+            pretrained_embed = torch.load(os.path.join(output_dir.split("/")[0], "data", "glove.pth"))
+            self.encoder = networks.KimCNN(**config["encoder"], pretrained_embed=pretrained_embed).to(self.device)
+
         common.print_network(self.encoder, "Encoder")
         self.proj_head = networks.ProjectionHead(in_dim=self.encoder.backbone_dim, **config["proj_head"]).to(
             self.device
@@ -58,9 +63,12 @@ class SimCLR:
     def train_one_step(self, data):
         """ Trains model on one batch of data """
 
-        img_i, img_j = data["i"].to(self.device), data["j"].to(self.device)
-        zi = self.proj_head(self.encoder(img_i))
-        zj = self.proj_head(self.encoder(img_j))
+        i, j = data["i"].to(self.device), data["j"].to(self.device)
+        print(i.shape, j.shape)
+        zi = self.proj_head(self.encoder(i))
+        zj = self.proj_head(self.encoder(j))
+        print(zi.shape, zj.shape)
+        exit()
 
         self.optim.zero_grad()
         loss = self.criterion(zi, zj)
@@ -90,8 +98,8 @@ class SimCLR:
         fvecs, gt = [], []
 
         for indx, data in enumerate(data_loader):
-            img, target = data["img"].to(self.device), data["target"]
-            z = self.proj_head(self.encoder(img))
+            input, target = data["input"].to(self.device), data["target"]
+            z = self.proj_head(self.encoder(input))
             z = F.normalize(z, p=2, dim=-1)
             fvecs.extend(z.detach().cpu().numpy())
             gt.extend(target.numpy())
@@ -137,9 +145,9 @@ class SimCLR:
             clf_head.train()
             epoch
             for batch in train_loader:
-                img, target = batch["img"].to(self.device), batch["target"]
+                input, target = batch["input"].to(self.device), batch["target"]
                 with torch.no_grad():
-                    h = self.encoder(img)
+                    h = self.encoder(input)
 
                 # Loss and update
                 out = clf_head(h)
@@ -156,9 +164,9 @@ class SimCLR:
             # Validation
             clf_head.eval()
             for batch in val_loader:
-                img, target = batch["img"].to(self.device), batch["target"]
+                input, target = batch["input"].to(self.device), batch["target"]
                 with torch.no_grad():
-                    h = self.encoder(img)
+                    h = self.encoder(input)
 
                 # Loss
                 out = clf_head(h).cpu()
@@ -375,7 +383,11 @@ class ClusteringModel:
 
         # Models
         save = torch.load(self.config["simclr_save"])
-        self.encoder = networks.Encoder(**config["encoder"]).to(self.device)
+        if self.config["dataset"] in ["cifar10", "cifar100"]:
+            self.encoder = networks.Encoder(**config["encoder"]).to(self.device)
+        else:
+            pretrained_embed = torch.load(os.path.join(output_dir.split("/")[0], "data", "glove.pth"))
+            self.encoder = networks.KimCNN(**config["encoder"], pretrained_embed=pretrained_embed).to(self.device)
         self.encoder.load_state_dict(save["enc"])
         common.print_network(self.encoder, "Encoder")
         self.cluster_head = networks.ClusteringHead(in_dim=self.encoder.backbone_dim, **config["cluster_head"]).to(
